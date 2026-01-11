@@ -25,7 +25,7 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(branchName)
         }
 
-        guard let branchRefValue = branchRefPtr else {
+        guard branchRefPtr != nil else {
             throw LibGit2Error.invalidReference
         }
 

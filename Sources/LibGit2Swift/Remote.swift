@@ -36,8 +36,13 @@ extension LibGit2 {
                 let url = git_remote_url(remotePtr)
                 let fetchURL = url != nil ? String(cString: url!) : nil
 
-                let pushURLPtr = git_remote_pushurl(remotePtr)
-                let pushURL = pushURLPtr != nil ? String(cString: pushURLPtr!) : nil
+                // 如果没有单独的push URL，使用fetch URL
+                var pushURL: String? = nil
+                if let pushURLPtr = git_remote_pushurl(remotePtr) {
+                    pushURL = String(cString: pushURLPtr)
+                } else {
+                    pushURL = fetchURL
+                }
 
                 let isDefault = name == "origin"
 
@@ -117,7 +122,7 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(name)
         }
 
-        guard let remotePtr = remote else {
+        guard remote != nil else {
             throw LibGit2Error.remoteNotFound(name)
         }
 

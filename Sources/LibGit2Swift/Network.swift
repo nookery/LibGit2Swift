@@ -38,7 +38,7 @@ extension LibGit2 {
 
         // 构建 refspec
         let refspec = "refs/heads/\(branchName):refs/heads/\(branchName)"
-        var refspecPtr = strdup(refspec)
+        let refspecPtr = strdup(refspec)
         defer { free(refspecPtr) }
         
         var refspecs = git_strarray()
@@ -120,7 +120,7 @@ extension LibGit2 {
         }
 
         // 执行 fetch
-        var refspecPtr = strdup(refspec)
+        let refspecPtr = strdup(refspec)
         defer { free(refspecPtr) }
         
         var refspecs = git_strarray()

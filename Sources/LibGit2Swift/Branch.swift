@@ -48,7 +48,6 @@ extension LibGit2 {
                 let isHead = git_branch_is_head(ref) == 1
 
                 // 获取分支的最新提交
-                var commitOid = git_oid()
                 var latestCommitHash = ""
                 var latestCommitMessage = ""
 
@@ -60,6 +59,13 @@ extension LibGit2 {
                         let messagePtr = git_commit_message(commitPtr)
                         if let msg = messagePtr {
                             latestCommitMessage = String(cString: msg).components(separatedBy: "\n").first ?? ""
+                        }
+
+                        // 获取提交hash
+                        let oid = git_commit_id(commitPtr)
+                        let hashPtr = git_oid_tostr_s(oid)
+                        if let hash = hashPtr {
+                            latestCommitHash = String(cString: hash)
                         }
                     }
                 }
@@ -197,6 +203,14 @@ extension LibGit2 {
 
         guard let commit = headCommit else {
             throw LibGit2Error.cannotGetHEAD
+        }
+
+        // 检查分支是否已存在
+        var existingBranch: OpaquePointer? = nil
+        let lookupResult = git_reference_lookup(&existingBranch, repo, "refs/heads/\(name)")
+        if lookupResult == 0 {
+            git_reference_free(existingBranch)
+            throw LibGit2Error.checkoutFailed(name) // 分支已存在
         }
 
         // 创建分支

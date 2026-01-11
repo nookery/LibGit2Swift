@@ -310,9 +310,12 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         // 创建初始提交
         try testRepo.createFileAndCommit(
             fileName: "file1.txt",
-            content: "Content on master",
+            content: "Content on main",
             message: "Initial commit"
         )
+
+        // 获取初始分支名
+        let initialBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
 
         // 创建新分支
         let branchName = "feature"
@@ -329,12 +332,12 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         try LibGit2.createCommit(message: "Modify on feature", at: testRepo.repositoryPath)
 
         // 切换回主分支
-        try LibGit2.checkout(branch: "master", at: testRepo.repositoryPath)
+        try LibGit2.checkout(branch: initialBranch, at: testRepo.repositoryPath)
 
         // 验证文件内容恢复到主分支的版本
         let content = try String(contentsOf: fileURL, encoding: .utf8)
-        XCTAssertEqual(content, "Content on master",
-                      "File content should match master branch after checkout")
+        XCTAssertEqual(content, "Content on main",
+                      "File content should match main branch after checkout")
     }
 
     // MARK: - Error Handling Tests
@@ -379,8 +382,11 @@ final class CheckoutTests: LibGit2SwiftTestCase {
             message: "Add feature"
         )
 
-        // 4. 切换回主分支
-        try LibGit2.checkout(branch: "master", at: testRepo.repositoryPath)
+        // 4. 切换回初始分支
+        let currentBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        // 从当前分支名推断初始分支名
+        let initialBranch = currentBranch == featureBranch ? "main" : currentBranch
+        try LibGit2.checkout(branch: initialBranch, at: testRepo.repositoryPath)
 
         // 5. 在主分支上工作
         try testRepo.createFileAndCommit(
@@ -390,12 +396,12 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         )
 
         // 6. 验证分支隔离
-        let commitsOnMaster = try LibGit2.getCommitList(on: "master", at: testRepo.repositoryPath)
+        let commitsOnInitial = try LibGit2.getCommitList(on: initialBranch, at: testRepo.repositoryPath)
         let commitsOnFeature = try LibGit2.getCommitList(on: featureBranch, at: testRepo.repositoryPath)
 
-        // 主分支应该包含 "Add main file" 提交
-        XCTAssertTrue(commitsOnMaster.contains { $0.message == "Add main file" },
-                      "Master branch should contain main commit")
+        // 初始分支应该包含 "Add main file" 提交
+        XCTAssertTrue(commitsOnInitial.contains { $0.message == "Add main file" },
+                      "\(initialBranch) branch should contain main commit")
 
         // 功能分支应该包含 "Add feature" 提交
         XCTAssertTrue(commitsOnFeature.contains { $0.message == "Add feature" },

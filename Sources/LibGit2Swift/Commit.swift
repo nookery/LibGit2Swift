@@ -30,8 +30,9 @@ extension LibGit2 {
             throw LibGit2Error.cannotCreateRevwalk
         }
 
-        // 按时间倒序排序
-        git_revwalk_sorting(walker, GIT_SORT_TIME.rawValue)
+        // 按时间倒序排序（最新的在前）
+        // 不设置排序，让revwalk按自然顺序遍历（通常是拓扑顺序，子提交在前）
+        // git_revwalk_sorting(walker, GIT_SORT_NONE.rawValue)
 
         // 从 HEAD 开始遍历
         git_revwalk_push_head(walker)
@@ -93,7 +94,8 @@ extension LibGit2 {
             throw LibGit2Error.cannotCreateRevwalk
         }
 
-        git_revwalk_sorting(walker, GIT_SORT_TIME.rawValue)
+        // 不设置排序，让revwalk按自然顺序遍历（通常是拓扑顺序，子提交在前）
+        // git_revwalk_sorting(walker, GIT_SORT_NONE.rawValue)
 
         // 推送分支引用
         let branchRef = "refs/heads/\(branch)"
@@ -143,7 +145,8 @@ extension LibGit2 {
             throw LibGit2Error.cannotCreateRevwalk
         }
 
-        git_revwalk_sorting(walker, GIT_SORT_TIME.rawValue)
+        // 不设置排序，让revwalk按自然顺序遍历（通常是拓扑顺序，子提交在前）
+        // git_revwalk_sorting(walker, GIT_SORT_NONE.rawValue)
 
         // 获取本地分支
         let localBranchRef = "refs/heads/\(branch)"

@@ -74,6 +74,9 @@ extension LibGit2 {
                     statusStr += "R"
                 } else if statusRaw & GIT_STATUS_INDEX_TYPECHANGE.rawValue != 0 {
                     statusStr += "T"
+                } else if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
+                    // 未跟踪文件在索引中显示为 ?
+                    statusStr += "?"
                 } else {
                     statusStr += " "
                 }
@@ -152,6 +155,11 @@ extension LibGit2 {
                     indexStatus = "R"
                 } else if statusRaw & GIT_STATUS_INDEX_TYPECHANGE.rawValue != 0 {
                     indexStatus = "T"
+                }
+
+                // 对于未跟踪文件，索引状态也是 ?
+                if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
+                    indexStatus = "?"
                 }
 
                 if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {

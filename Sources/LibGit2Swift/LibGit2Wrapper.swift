@@ -105,10 +105,19 @@ public class LibGit2 {
             throw LibGit2Error.configNotFound
         }
 
-        let result = git_config_set_string(configuration, key, value)
-
-        if result != 0 {
-            throw LibGit2Error.configKeyNotFound(key)
+        let result: Int32
+        if value.isEmpty {
+            // 空值表示删除配置
+            result = git_config_delete_entry(configuration, key)
+            // 删除不存在的配置不应该抛出错误
+            if result != 0 && result != GIT_ENOTFOUND.rawValue {
+                throw LibGit2Error.configKeyNotFound(key)
+            }
+        } else {
+            result = git_config_set_string(configuration, key, value)
+            if result != 0 {
+                throw LibGit2Error.configKeyNotFound(key)
+            }
         }
 
         os_log("🐚 LibGit2: Config set successfully: %{public}@ = %{public}@", key, value)

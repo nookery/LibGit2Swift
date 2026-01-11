@@ -62,11 +62,53 @@ extension LibGit2 {
         } else {
             // 添加指定的文件
             for file in files {
-                let result = git_index_add_bypath(indexPtr, file)
-                if result != 0 {
-                    throw LibGit2Error.addFileFailed(file)
+                // 跳过空路径
+                if file.isEmpty {
+                    continue
                 }
-                os_log("🐚 LibGit2: Added file: %{public}@", file)
+
+                // 检查是否包含通配符
+                if file.contains("*") || file.contains("?") || file.contains("[") {
+                    // 对于模式，使用 git_index_add_all
+                    let cString = strdup(file)
+                    var strings = [cString]
+                    var result: Int32 = 0
+
+                    strings.withUnsafeMutableBufferPointer { buffer in
+                        var pathspec = git_strarray(strings: buffer.baseAddress, count: 1)
+                        result = git_index_add_all(indexPtr, &pathspec, GIT_INDEX_ADD_DEFAULT.rawValue, nil, nil)
+                    }
+
+                    if result != 0 {
+                        os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result)
+                    } else {
+                        os_log("🐚 LibGit2: Added files with pattern: %{public}@", file)
+                    }
+
+                    // 清理
+                    free(cString)
+
+                    if result != 0 {
+                        os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result)
+                    } else {
+                        os_log("🐚 LibGit2: Added files with pattern: %{public}@", file)
+                    }
+                } else {
+                    // 首先尝试添加文件（用于新增或修改的文件）
+                    var result = git_index_add_bypath(indexPtr, file)
+                    if result != 0 {
+                        // 如果添加失败，尝试移除文件（用于删除的文件）
+                        result = git_index_remove_bypath(indexPtr, file)
+                        if result != 0 {
+                            // 对于真正不存在的文件，我们不抛出错误，而是继续处理
+                            os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@ (error: %d), continuing...", file, result)
+                        } else {
+                            os_log("🐚 LibGit2: Removed file: %{public}@", file)
+                        }
+                    } else {
+                        os_log("🐚 LibGit2: Added file: %{public}@", file)
+                    }
+                }
             }
         }
 

@@ -157,18 +157,6 @@ extension LibGit2 {
             throw LibGit2Error.invalidValue
         }
 
-        let resetType: git_reset_t
-        switch resetMode.lowercased() {
-        case "soft":
-            resetType = GIT_RESET_SOFT
-        case "mixed":
-            resetType = GIT_RESET_MIXED
-        case "hard":
-            resetType = GIT_RESET_HARD
-        default:
-            resetType = GIT_RESET_MIXED
-        }
-
         var stringPointers: [UnsafeMutablePointer<CChar>?] = paths.map { strdup($0) }
         defer {
             for ptr in stringPointers {

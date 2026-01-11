@@ -18,76 +18,38 @@ extension LibGit2 {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
-        // 查找分支
+        // 确保分支引用存在
         let branchRef = "refs/heads/\(branch)"
         var reference: OpaquePointer? = nil
         defer { if reference != nil { git_reference_free(reference) } }
 
-        let result = git_reference_lookup(&reference, repo, branchRef)
-
-        if result != 0 {
+        let lookupResult = git_reference_lookup(&reference, repo, branchRef)
+        if lookupResult != 0 {
+            os_log("⚠️ LibGit2: Branch reference %{public}@ does not exist (error: %d)", branchRef, lookupResult)
             throw LibGit2Error.checkoutFailed(branch)
         }
 
-        guard let ref = reference else {
-            throw LibGit2Error.invalidReference
-        }
+        // 直接设置HEAD文件内容为符号引用
+        let gitDir = try gitDirectory(at: path)
+        let headPath = (gitDir as NSString).appendingPathComponent("HEAD")
 
-        // 获取分支指向的 commit
-        var commitOID: git_oid
-        if git_reference_type(ref) == GIT_REFERENCE_DIRECT {
-            commitOID = git_reference_target(ref)!.pointee
-        } else {
-            // 符号引用，解析目标
-            var resolvedRef: OpaquePointer? = nil
-            defer { if resolvedRef != nil { git_reference_free(resolvedRef) } }
-            if git_reference_resolve(&resolvedRef, ref) == 0, let target = git_reference_target(resolvedRef!) {
-                commitOID = target.pointee
-            } else {
-                throw LibGit2Error.invalidReference
-            }
-        }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &commitOID) == 0,
-              let commitPtr = commit else {
+        do {
+            try "ref: \(branchRef)\n".write(toFile: headPath, atomically: true, encoding: .utf8)
+            print("🐚 LibGit2: Directly wrote HEAD file: ref: \(branchRef)")
+        } catch {
+            print("⚠️ LibGit2: Failed to write HEAD file: \(error)")
             throw LibGit2Error.checkoutFailed(branch)
         }
 
-        // 执行 checkout
-        var tree: OpaquePointer? = nil
-        defer { if tree != nil { git_tree_free(tree) } }
-
-        guard git_commit_tree(&tree, commitPtr) == 0 else {
-            throw LibGit2Error.checkoutFailed(branch)
-        }
-
+        // 检出工作目录到 HEAD
         var checkoutOpts = git_checkout_options()
         git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+        // 使用 FORCE 策略确保工作目录被正确更新
+        checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue
 
-        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-        checkoutOpts.progress_cb = { (path: UnsafePointer<CChar>?, completed: Int, total: Int, payload: UnsafeMutableRawPointer?) in
-            let percent = total > 0 ? Int(Float(completed) / Float(total) * 100) : 0
-            if let path = path {
-                os_log("🐚 LibGit2: Checkout progress: %d%% - %{public}s", percent, String(cString: path))
-            } else {
-                os_log("🐚 LibGit2: Checkout progress: %d%%", percent)
-            }
-        }
-        checkoutOpts.progress_payload = nil // No payload needed for this simple logging
-
-        let checkoutResult = git_checkout_tree(repo, tree, &checkoutOpts)
-
+        let checkoutResult = git_checkout_head(repo, &checkoutOpts)
         if checkoutResult != 0 {
-            throw LibGit2Error.checkoutFailed(branch)
-        }
-
-        // 设置 HEAD
-        let setHeadResult = git_repository_set_head(repo, branchRef)
-
-        if setHeadResult != 0 {
+            print("⚠️ LibGit2: Checkout failed (error: \(checkoutResult))")
             throw LibGit2Error.checkoutFailed(branch)
         }
 
@@ -102,7 +64,7 @@ extension LibGit2 {
         os_log("🐚 LibGit2: Creating and checking out new branch: %{public}@", branchName)
 
         // 首先创建分支
-        try createBranch(named: branchName, at: path, checkout: false)
+        _ = try createBranch(named: branchName, at: path, checkout: false)
 
         // 然后切换到新分支
         try checkout(branch: branchName, at: path)
@@ -153,7 +115,7 @@ extension LibGit2 {
         if git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry {
             defer { git_tree_entry_free(entry) }
 
-            var entryOID = git_tree_entry_id(entry)
+            let entryOID = git_tree_entry_id(entry)
 
             var blob: OpaquePointer? = nil
             defer { if blob != nil { git_blob_free(blob) } }
@@ -354,7 +316,7 @@ extension LibGit2 {
         let localName = localBranch ?? remoteBranch.replacingOccurrences(of: "^[^/]+/", with: "", options: .regularExpression)
 
         // 创建本地分支跟踪远程分支
-        try createBranch(named: localName, at: path, checkout: false)
+        _ = try createBranch(named: localName, at: path, checkout: false)
 
         // 设置上游
         let repo = try openRepository(at: path)

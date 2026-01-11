@@ -111,7 +111,7 @@ extension LibGit2 {
             if tree != nil {
                 var diffOpts = git_diff_options()
                 git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-                var filePathCStr = strdup(file)
+                let filePathCStr = strdup(file)
                 var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
                 strings.withUnsafeMutableBufferPointer { buffer in
                     diffOpts.pathspec.strings = buffer.baseAddress
@@ -134,7 +134,7 @@ extension LibGit2 {
 
             var diffOpts = git_diff_options()
             git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-            var filePathCStr = strdup(file)
+            let filePathCStr = strdup(file)
             var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
             strings.withUnsafeMutableBufferPointer { buffer in
                 diffOpts.pathspec.strings = buffer.baseAddress
@@ -205,7 +205,7 @@ extension LibGit2 {
         }
 
         // 获取父commit（用于比较）
-        var parentCount = git_commit_parentcount(commitPtr)
+        let parentCount = git_commit_parentcount(commitPtr)
         var diff: OpaquePointer? = nil
         defer { if diff != nil { git_diff_free(diff) } }
 

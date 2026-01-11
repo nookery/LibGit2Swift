@@ -161,7 +161,7 @@ extension LibGit2 {
         }
 
         // 获取父提交的父提交（祖父母）
-        var parentCount = git_commit_parentcount(commit)
+        let parentCount = git_commit_parentcount(commit)
         var parents = [OpaquePointer?]()
         defer {
             for parent in parents {

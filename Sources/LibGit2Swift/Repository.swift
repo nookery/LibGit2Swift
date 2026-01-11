@@ -48,7 +48,8 @@ extension LibGit2 {
             if repo != nil { git_repository_free(repo) }
         }
 
-        let result = git_repository_open_ext(&repo, path, GIT_REPOSITORY_OPEN_NO_SEARCH.rawValue, nil)
+        // 使用默认标志，允许向上搜索
+        let result = git_repository_open_ext(&repo, path, 0, nil)
         if result != 0, repo == nil {
             return nil
         }
@@ -56,7 +57,9 @@ extension LibGit2 {
         if let repository = repo {
             let workdir = git_repository_workdir(repository)
             if let pathPtr = workdir {
-                return String(cString: pathPtr)
+                let workdirPath = String(cString: pathPtr)
+                // 移除结尾的斜杠
+                return workdirPath.hasSuffix("/") ? String(workdirPath.dropLast()) : workdirPath
             }
         }
 
@@ -70,6 +73,36 @@ extension LibGit2 {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
+        // 首先尝试直接读取HEAD文件
+        let gitDir = try gitDirectory(at: path)
+        let headPath = (gitDir as NSString).appendingPathComponent("HEAD")
+
+        if let headContent = try? String(contentsOfFile: headPath, encoding: .utf8) {
+            let trimmedContent = headContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedContent.hasPrefix("ref: ") {
+                let refName = String(trimmedContent.dropFirst(5))
+                // "refs/heads/main" -> "main"
+                if refName.hasPrefix("refs/heads/") {
+                    let branchName = String(refName.dropFirst(11))
+                    // 检查分支引用是否存在
+                    let repo = try openRepository(at: path)
+                    defer { git_repository_free(repo) }
+
+                    var reference: OpaquePointer? = nil
+                    let lookupResult = git_reference_lookup(&reference, repo, refName)
+                    if lookupResult == 0 {
+                        git_reference_free(reference)
+                        return branchName
+                    } else {
+                        // 分支引用不存在，抛出错误
+                        throw LibGit2Error.invalidReference
+                    }
+                }
+                return refName
+            }
+        }
+
+        // 回退到libgit2 API
         var head: OpaquePointer? = nil
         defer {
             if head != nil { git_reference_free(head) }
@@ -89,20 +122,25 @@ extension LibGit2 {
         }
 
         // 检查是否是符号引用（分支）
-        if git_reference_type(reference) == GIT_REFERENCE_SYMBOLIC {
+        let refType = git_reference_type(reference)
+        if refType == GIT_REFERENCE_SYMBOLIC {
             let target = git_reference_symbolic_target(reference)
             if let targetPtr = target {
                 let targetName = String(cString: targetPtr)
                 // "refs/heads/main" -> "main"
-                return targetName.replacingOccurrences(of: "refs/heads/", with: "")
+                let branchName = targetName.replacingOccurrences(of: "refs/heads/", with: "")
+                print("🐚 LibGit2: HEAD is symbolic ref to branch: \(branchName)")
+                return branchName
             }
         }
 
-        // HEAD detached，返回 commit hash
+        // HEAD detached 或直接引用，返回 commit hash
         if let headPtr = head {
             let oid = git_reference_target(headPtr)
             if let oidPtr = oid {
-                return oidToString(oidPtr.pointee)
+                let hash = oidToString(oidPtr.pointee)
+                print("🐚 LibGit2: HEAD is detached at commit: \(hash)")
+                return hash
             }
         }
 

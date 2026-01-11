@@ -179,7 +179,6 @@ extension LibGit2 {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
-        var tagOID = git_oid()
         var targetOID = git_oid()
 
         guard git_oid_fromstr(&targetOID, commitHash) == 0 else {

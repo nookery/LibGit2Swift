@@ -56,17 +56,28 @@ final class DiffTests: LibGit2SwiftTestCase {
         let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
         XCTAssertEqual(commits.count, 3, "Should have 3 commits")
 
-        // 验证第二次提交（修改）
-        let secondCommitFiles = try LibGit2.getCommitDiffFiles(atCommit: commits[1].hash, at: testRepo.repositoryPath)
-        XCTAssertEqual(secondCommitFiles.count, 1, "Second commit should have one modified file")
-        XCTAssertEqual(secondCommitFiles.first?.file, "file1.txt", "File should be file1.txt")
-        XCTAssertEqual(secondCommitFiles.first?.changeType, "M", "Change type should be 'M' (modified)")
+        // 由于提交按时间倒序排列：
+        // commits[0]：最新的提交（添加file2.txt）
+        // commits[1]：中间提交（修改file1.txt）
+        // commits[2]：最旧的提交（初始添加file1.txt）
 
-        // 验证第三次提交（添加）
-        let thirdCommitFiles = try LibGit2.getCommitDiffFiles(atCommit: commits[2].hash, at: testRepo.repositoryPath)
-        XCTAssertEqual(thirdCommitFiles.count, 1, "Third commit should have one added file")
-        XCTAssertEqual(thirdCommitFiles.first?.file, "file2.txt", "File should be file2.txt")
-        XCTAssertEqual(thirdCommitFiles.first?.changeType, "A", "Change type should be 'A' (added)")
+        // 验证最新的提交（添加file2.txt）
+        let latestCommitFiles = try LibGit2.getCommitDiffFiles(atCommit: commits[0].hash, at: testRepo.repositoryPath)
+        XCTAssertEqual(latestCommitFiles.count, 1, "Latest commit should have one added file")
+        XCTAssertEqual(latestCommitFiles.first?.file, "file2.txt", "File should be file2.txt")
+        XCTAssertEqual(latestCommitFiles.first?.changeType, "A", "Change type should be 'A' (added)")
+
+        // 验证中间提交（修改file1.txt）
+        let middleCommitFiles = try LibGit2.getCommitDiffFiles(atCommit: commits[1].hash, at: testRepo.repositoryPath)
+        XCTAssertEqual(middleCommitFiles.count, 1, "Middle commit should have one modified file")
+        XCTAssertEqual(middleCommitFiles.first?.file, "file1.txt", "File should be file1.txt")
+        XCTAssertEqual(middleCommitFiles.first?.changeType, "M", "Change type should be 'M' (modified)")
+
+        // 验证最旧的提交（初始添加file1.txt）
+        let oldestCommitFiles = try LibGit2.getCommitDiffFiles(atCommit: commits[2].hash, at: testRepo.repositoryPath)
+        XCTAssertEqual(oldestCommitFiles.count, 1, "Oldest commit should have one added file")
+        XCTAssertEqual(oldestCommitFiles.first?.file, "file1.txt", "File should be file1.txt")
+        XCTAssertEqual(oldestCommitFiles.first?.changeType, "A", "Change type should be 'A' (added)")
     }
 
     func testGetCommitDiffFilesWithDeletions() throws {

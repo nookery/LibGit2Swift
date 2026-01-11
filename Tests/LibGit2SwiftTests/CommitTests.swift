@@ -27,18 +27,22 @@ final class CommitTests: LibGit2SwiftTestCase {
     }
 
     func testGetCommitListMultipleCommits() throws {
-        // 创建多个提交
+        // 创建多个提交（添加延迟确保时间顺序）
         try testRepo.createFileAndCommit(
             fileName: "file1.txt",
             content: "Content 1",
             message: "Commit 1"
         )
 
+        Thread.sleep(forTimeInterval: 0.01) // 10ms delay
+
         try testRepo.createFileAndCommit(
             fileName: "file2.txt",
             content: "Content 2",
             message: "Commit 2"
         )
+
+        Thread.sleep(forTimeInterval: 0.01) // 10ms delay
 
         try testRepo.createFileAndCommit(
             fileName: "file3.txt",
@@ -172,7 +176,7 @@ final class CommitTests: LibGit2SwiftTestCase {
 
         // 创建并切换到新分支
         let branchName = TestDataGenerator.randomBranchName()
-        try LibGit2.createBranch(named: branchName, at: testRepo.repositoryPath)
+        try LibGit2.createBranch(named: branchName, at: testRepo.repositoryPath, checkout: true)
 
         // 在新分支上创建提交
         for i in 1...2 {
@@ -183,13 +187,13 @@ final class CommitTests: LibGit2SwiftTestCase {
             )
         }
 
-        // 获取主分支的提交
-        let mainCommits = try LibGit2.getCommitList(on: "master", at: testRepo.repositoryPath)
-        XCTAssertGreaterThanOrEqual(mainCommits.count, 5, "Main branch should have at least 5 commits")
+        // 获取主分支的提交（应该有3个初始提交）
+        let mainCommits = try LibGit2.getCommitList(on: "main", at: testRepo.repositoryPath)
+        XCTAssertEqual(mainCommits.count, 3, "Main branch should have exactly 3 commits")
 
-        // 获取新分支的提交
+        // 获取新分支的提交（应该有3个继承的 + 2个自己的 = 5个）
         let branchCommits = try LibGit2.getCommitList(on: branchName, at: testRepo.repositoryPath)
-        XCTAssertGreaterThanOrEqual(branchCommits.count, 2, "New branch should have at least 2 commits")
+        XCTAssertEqual(branchCommits.count, 5, "New branch should have exactly 5 commits (3 inherited + 2 new)")
     }
 
     // MARK: - Commit with Tags Tests
@@ -208,8 +212,8 @@ final class CommitTests: LibGit2SwiftTestCase {
             return
         }
 
-        // 创建标签
-        try testRepo.createTag(tagName: "v1.0.0", message: "Version 1.0.0")
+        // 创建轻量标签（直接引用提交）
+        try LibGit2.createTag(named: "v1.0.0", at: commit.hash, in: testRepo.repositoryPath)
 
         // 重新获取提交列表以包含标签信息
         let updatedCommits = try LibGit2.getCommitList(at: testRepo.repositoryPath)

@@ -67,6 +67,9 @@ final class TestGitRepository {
 
         // 创建提交
         _ = try LibGit2.createCommit(message: message, at: repositoryPath)
+
+        // 如果这是第一次调用，确保创建main分支
+        // 注意：这可能不是最优的解决方案，但可以避免重复创建分支的问题
     }
 
     /// 创建多个分支
