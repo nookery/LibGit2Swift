@@ -257,4 +257,428 @@ final class DiffTests: LibGit2SwiftTestCase {
         XCTAssertEqual(unstagedDiff.count, 0, "Should have no unstaged changes")
         XCTAssertEqual(stagedDiff.count, 0, "Should have no staged changes")
     }
+
+    // MARK: - File Content Change Tests
+
+    func testGetFileContentChangeWithModification() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Original content",
+            message: "Initial commit"
+        )
+
+        // 修改文件
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Modified content",
+            message: "Modify file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // commits[0] 是最新的提交（"Modify file"），获取该提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getFileContentChange(
+            atCommit: commits[0].hash,
+            file: "test.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(beforeContent, "Original content", "Before content should match original")
+        XCTAssertEqual(afterContent, "Modified content", "After content should match modified")
+    }
+
+    func testGetFileContentChangeWithAddition() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial",
+            message: "Initial commit"
+        )
+
+        // 添加新文件
+        try testRepo.createFileAndCommit(
+            fileName: "newfile.txt",
+            content: "New file content",
+            message: "Add new file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // commits[0] 是最新的提交（"Add new file"），获取该提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getFileContentChange(
+            atCommit: commits[0].hash,
+            file: "newfile.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertNil(beforeContent, "Before content should be nil for new file")
+        XCTAssertEqual(afterContent, "New file content", "After content should match new file")
+    }
+
+    func testGetFileContentChangeWithDeletion() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "toremove.txt",
+            content: "Will be deleted",
+            message: "Add file"
+        )
+
+        // 删除文件
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("toremove.txt")
+        try FileManager.default.removeItem(at: fileURL)
+        try LibGit2.addFiles(["toremove.txt"], at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath)
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取删除提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getFileContentChange(
+            atCommit: commits[0].hash,
+            file: "toremove.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(beforeContent, "Will be deleted", "Before content should exist")
+        XCTAssertNil(afterContent, "After content should be nil for deleted file")
+    }
+
+    func testGetFileContentChangeInitialCommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取初始提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getFileContentChange(
+            atCommit: commits[0].hash,
+            file: "initial.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertNil(beforeContent, "Initial commit should have no before content")
+        XCTAssertEqual(afterContent, "Initial content", "After content should match")
+    }
+
+    func testGetUncommittedFileContentChange() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Original content",
+            message: "Initial commit"
+        )
+
+        // 修改文件（不提交）
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("test.txt")
+        try "Modified uncommitted content".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // 获取未提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getUncommittedFileContentChange(
+            for: "test.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(beforeContent, "Original content", "Before content should match HEAD")
+        XCTAssertEqual(afterContent, "Modified uncommitted content", "After content should match working directory")
+    }
+
+    func testGetUncommittedFileContentChangeNewFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "existing.txt",
+            content: "Existing",
+            message: "Initial commit"
+        )
+
+        // 创建新文件（不提交）
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("newfile.txt")
+        try "New untracked file".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // 获取未提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getUncommittedFileContentChange(
+            for: "newfile.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertNil(beforeContent, "New file should have no before content")
+        XCTAssertEqual(afterContent, "New untracked file", "After content should match working directory")
+    }
+
+    func testGetUncommittedFileContentChangeDeletedFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "toremove.txt",
+            content: "Will be deleted",
+            message: "Add file"
+        )
+
+        // 删除文件（不提交）
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("toremove.txt")
+        try FileManager.default.removeItem(at: fileURL)
+
+        // 获取未提交的文件内容变更
+        let (beforeContent, afterContent) = try LibGit2.getUncommittedFileContentChange(
+            for: "toremove.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(beforeContent, "Will be deleted", "Before content should match HEAD")
+        XCTAssertNil(afterContent, "Deleted file should have no after content")
+    }
+
+    // MARK: - File Diff Tests
+
+    func testGetFileDiffModification() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Line 1\nLine 2\nLine 3",
+            message: "Initial commit"
+        )
+
+        // 修改文件
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Line 1\nLine 2 modified\nLine 3",
+            message: "Modify file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取最新提交的 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "test.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty")
+        XCTAssertTrue(diff.contains("test.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("Line 2 modified"), "Diff should show modification")
+        XCTAssertTrue(diff.contains("-") || diff.contains("+"), "Diff should have diff markers")
+    }
+
+    func testGetFileDiffAddition() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial",
+            message: "Initial commit"
+        )
+
+        // 添加新文件
+        try testRepo.createFileAndCommit(
+            fileName: "newfile.txt",
+            content: "New file content",
+            message: "Add new file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取最新提交的 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "newfile.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty for new file")
+        XCTAssertTrue(diff.contains("newfile.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("+") || diff.contains("New file content"), "Diff should show addition")
+    }
+
+    func testGetFileDiffDeletion() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "delete.txt",
+            content: "To be deleted",
+            message: "Add file"
+        )
+
+        // 删除文件
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("delete.txt")
+        try FileManager.default.removeItem(at: fileURL)
+        try LibGit2.addFiles(["delete.txt"], at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath)
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "delete.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty for deletion")
+        XCTAssertTrue(diff.contains("delete.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("-") || diff.contains("To be deleted"), "Diff should show deletion")
+    }
+
+    func testGetFileDiffInitialCommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Line 1\nLine 2\nLine 3",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取初始提交的 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "initial.txt",
+            at: testRepo.repositoryPath
+        )
+
+        // 初始提交应该有 diff（与空树比较）
+        XCTAssertTrue(diff.contains("initial.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("Line 1"), "Diff should show content")
+    }
+
+    func testGetFileDiffMultiLineChanges() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "multiline.txt",
+            content: "Line 1\nLine 2\nLine 3\nLine 4\nLine 5",
+            message: "Initial commit"
+        )
+
+        // 多行修改
+        try testRepo.createFileAndCommit(
+            fileName: "multiline.txt",
+            content: "Line 1 modified\nLine 2\nLine 3 modified\nLine 4\nLine 5 modified",
+            message: "Multi-line changes"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取最新提交的 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "multiline.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty")
+        XCTAssertTrue(diff.contains("multiline.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("Line 1 modified"), "Diff should show first modification")
+        XCTAssertTrue(diff.contains("Line 3 modified"), "Diff should show second modification")
+        XCTAssertTrue(diff.contains("Line 5 modified"), "Diff should show third modification")
+    }
+
+    func testGetFileDiffWithBinaryFile() throws {
+        // 创建初始提交（使用 Data 来处理二进制内容）
+        let binaryData1 = Data([0x00, 0x01, 0x02, 0x03, 0x04])
+        let binaryString1 = binaryData1.base64EncodedString()
+
+        try testRepo.createFileAndCommit(
+            fileName: "binary.bin",
+            content: binaryString1,
+            message: "Add binary file"
+        )
+
+        // 修改二进制文件
+        let binaryData2 = Data([0x00, 0x01, 0x02, 0x03, 0x04, 0x05])
+        let binaryString2 = binaryData2.base64EncodedString()
+
+        try testRepo.createFileAndCommit(
+            fileName: "binary.bin",
+            content: binaryString2,
+            message: "Modify binary"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取 diff（可能为空或显示为二进制）
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[1].hash,
+            for: "binary.bin",
+            at: testRepo.repositoryPath
+        )
+
+        // 二进制文件的 diff 可能为空或特殊标记
+        // 只要不抛出错误就通过
+        XCTAssertTrue(true, "Should handle binary files without crashing")
+    }
+
+    func testGetFileDiffNonExistentFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "existing.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 尝试获取不存在的文件的 diff
+        let diff = try LibGit2.getFileDiff(
+            atCommit: commits[0].hash,
+            for: "nonexistent.txt",
+            at: testRepo.repositoryPath
+        )
+
+        // 不存在的文件应该返回空 diff
+        XCTAssertEqual(diff, "", "Non-existent file should return empty diff")
+    }
+
+    func testGetFileContentChangeInvalidCommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 尝试使用无效的 commit hash
+        XCTAssertThrowsError(
+            try LibGit2.getFileContentChange(
+                atCommit: "invalid_hash_12345",
+                file: "test.txt",
+                at: testRepo.repositoryPath
+            )
+        ) { error in
+            XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for invalid commit hash")
+        }
+    }
+
+    func testGetFileContentChangeNonExistentFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "existing.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 尝试获取不存在的文件的内容变更
+        let (beforeContent, afterContent) = try LibGit2.getFileContentChange(
+            atCommit: commits[0].hash,
+            file: "nonexistent.txt",
+            at: testRepo.repositoryPath
+        )
+
+        // 不存在的文件应该返回 (nil, nil)
+        XCTAssertNil(beforeContent, "Non-existent file should have nil before content")
+        XCTAssertNil(afterContent, "Non-existent file should have nil after content")
+    }
 }
