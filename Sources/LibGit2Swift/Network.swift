@@ -57,6 +57,9 @@ extension LibGit2 {
                 return 0
             }
 
+            // 设置凭据回调
+            pushOpts.callbacks.credentials = gitCredentialCallback
+
             return git_remote_push(remotePtr, &refspecs, &pushOpts)
         }
 
@@ -120,10 +123,13 @@ extension LibGit2 {
             return 0
         }
 
+        // 设置凭据回调
+        fetchOpts.callbacks.credentials = gitCredentialCallback
+
         // 执行 fetch
         let refspecPtr = strdup(refspec)
         defer { free(refspecPtr) }
-        
+
         var refspecs = git_strarray()
         var refspecArray: [UnsafeMutablePointer<CChar>?] = [refspecPtr]
         let fetchResult = refspecArray.withUnsafeMutableBufferPointer { buffer -> Int32 in
