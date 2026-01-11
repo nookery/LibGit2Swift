@@ -216,8 +216,8 @@ public enum LibGit2Error: Error, LocalizedError {
     case addFileFailed(String)
     case checkoutFailed(String)
     case remoteNotFound(String)
-    case pushFailed
-    case pullFailed
+    case pushFailed(String)  // 修改：携带详细错误消息
+    case pullFailed(String)  // 修改：携带详细错误消息
     case cloneFailed
     case mergeConflict
     case invalidRepository
@@ -255,10 +255,10 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Failed to checkout branch: \(branch)"
         case .remoteNotFound(let remote):
             return "Remote not found: \(remote)"
-        case .pushFailed:
-            return "Failed to push to remote"
-        case .pullFailed:
-            return "Failed to pull from remote"
+        case .pushFailed(let message):
+            return message  // 修改：使用详细错误消息
+        case .pullFailed(let message):
+            return message  // 修改：使用详细错误消息
         case .cloneFailed:
             return "Failed to clone repository"
         case .mergeConflict:

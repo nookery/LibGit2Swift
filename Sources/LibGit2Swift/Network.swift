@@ -64,8 +64,9 @@ extension LibGit2 {
             if let error = git_error_last() {
                 let message = String(cString: error.pointee.message)
                 os_log("❌ LibGit2: Push failed: %{public}@", message)
+                throw LibGit2Error.pushFailed(message)
             }
-            throw LibGit2Error.pushFailed
+            throw LibGit2Error.pushFailed("Unknown push error")
         }
 
         os_log("🐚 LibGit2: Push completed successfully")
@@ -135,8 +136,9 @@ extension LibGit2 {
             if let error = git_error_last() {
                 let message = String(cString: error.pointee.message)
                 os_log("❌ LibGit2: Fetch failed: %{public}@", message)
+                throw LibGit2Error.pullFailed(message)
             }
-            throw LibGit2Error.pullFailed
+            throw LibGit2Error.pullFailed("Unknown fetch error")
         }
 
         // 获取远程分支的 commit
@@ -144,14 +146,14 @@ extension LibGit2 {
         var remoteOID = git_oid()
 
         if git_reference_name_to_id(&remoteOID, repo, remoteBranchRef) != 0 {
-            throw LibGit2Error.pullFailed
+            throw LibGit2Error.pullFailed("Failed to get remote branch reference")
         }
 
         var remoteAnnotatedCommit: OpaquePointer? = nil
         defer { if remoteAnnotatedCommit != nil { git_annotated_commit_free(remoteAnnotatedCommit) } }
 
         if git_annotated_commit_lookup(&remoteAnnotatedCommit, repo, &remoteOID) != 0 {
-            throw LibGit2Error.pullFailed
+            throw LibGit2Error.pullFailed("Failed to lookup annotated commit")
         }
 
         // 分析合并
