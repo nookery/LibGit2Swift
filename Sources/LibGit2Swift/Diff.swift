@@ -398,6 +398,7 @@ extension LibGit2 {
         // 获取该commit的父commit（用于获取修改前的内容）
         let parentCount = git_commit_parentcount(commitPtr)
         var beforeContent: String? = nil
+        var afterContent: String? = nil
 
         if parentCount > 0 {
             // 有父commit，从父commit获取文件内容
@@ -406,9 +407,11 @@ extension LibGit2 {
             var parentCommit: OpaquePointer? = nil
             defer { if parentCommit != nil { git_commit_free(parentCommit) } }
 
-            if git_commit_lookup(&parentCommit, repo, &parentOid) == 0, let parentCommitPtr = parentCommit {
+            if git_commit_lookup(&parentCommit, repo, &parentOid) == 0 {
+                guard let hashPtr = git_oid_tostr_s(&parentOid) else {
+                    return (nil, nil)
+                }
                 do {
-                    let hashPtr = git_oid_tostr_s(&parentOid)
                     let parentCommitHash = String(cString: hashPtr)
                     beforeContent = try getFileContent(atCommit: parentCommitHash, file: filePath, at: repoPath)
                 } catch {
@@ -422,7 +425,6 @@ extension LibGit2 {
         }
 
         // 从当前commit获取文件内容（修改后的内容）
-        var afterContent: String? = nil
         do {
             afterContent = try getFileContent(atCommit: commitHash, file: filePath, at: repoPath)
         } catch {
@@ -447,13 +449,14 @@ extension LibGit2 {
 
         var headOID = git_oid()
         if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-            let hashPtr = git_oid_tostr_s(&headOID)
-            let headCommitHash = String(cString: hashPtr)
-            do {
-                beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
-            } catch {
-                // 文件在HEAD中不存在（新文件），这是正常情况
-                beforeContent = nil
+            if let hashPtr = git_oid_tostr_s(&headOID) {
+                let headCommitHash = String(cString: hashPtr)
+                do {
+                    beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
+                } catch {
+                    // 文件在HEAD中不存在（新文件），这是正常情况
+                    beforeContent = nil
+                }
             }
         }
 
