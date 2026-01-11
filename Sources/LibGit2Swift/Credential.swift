@@ -141,15 +141,21 @@ public let gitCredentialCallback: @convention(c) (
 
     let urlString = String(cString: urlPointer)
     os_log("🔐 Credential callback invoked for: %{public}@", log: CredentialManager.logger, type: .info, urlString)
+    os_log("🔐 Allowed credential types: %{public}@", log: CredentialManager.logger, type: .debug, allowed_types)
 
     // 从Keychain或git helper获取凭据
     guard let (username, password) = CredentialManager.getCredential(for: urlString) else {
         os_log("❌ No credentials found for: %{public}@", log: CredentialManager.logger, type: .error, urlString)
+        os_log("💡 Hint: You can add credentials using 'git credential approve' or Keychain Access", log: CredentialManager.logger, type: .info)
         return Int32(GIT_EUSER.rawValue)
     }
 
+    os_log("✅ Found credentials for user: %{public}@", log: CredentialManager.logger, type: .info, username)
+
     // 根据allowed_types选择合适的凭据类型
     if allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 {
+        os_log("🔑 Using user/pass plaintext authentication", log: CredentialManager.logger, type: .debug)
+
         // 使用明文用户名/密码
         let result = username.withCString { usernamePtr in
             password.withCString { passwordPtr in
@@ -164,13 +170,17 @@ public let gitCredentialCallback: @convention(c) (
         if result == 0 {
             os_log("✅ Successfully created userpass credential for: %{public}@", log: CredentialManager.logger, type: .info, username)
             return 0
+        } else {
+            os_log("❌ Failed to create credential, error code: %d", log: CredentialManager.logger, type: .error, result)
+            return Int32(GIT_EUSER.rawValue)
         }
     }
 
     if allowed_types & GIT_CREDENTIAL_SSH_KEY.rawValue != 0 {
         // TODO: 实现SSH密钥认证
-        os_log("⚠️ SSH key authentication not yet implemented", log: CredentialManager.logger, type: .default)
+        os_log("⚠️ SSH key authentication requested but not yet implemented", log: CredentialManager.logger, type: .error)
     }
 
+    os_log("❌ No supported credential type found in allowed_types: %u", log: CredentialManager.logger, type: .error, allowed_types)
     return Int32(GIT_EUSER.rawValue)
 }

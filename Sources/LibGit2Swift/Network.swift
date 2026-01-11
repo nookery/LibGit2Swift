@@ -64,12 +64,23 @@ extension LibGit2 {
         }
 
         if result_strarray != 0 {
+            var errorMessage = "Unknown push error"
+
+            // 尝试从 libgit2 获取错误消息
             if let error = git_error_last() {
                 let message = String(cString: error.pointee.message)
-                os_log("❌ LibGit2: Push failed: %{public}@", message)
-                throw LibGit2Error.pushFailed(message)
+                if !message.isEmpty {
+                    errorMessage = message
+                }
             }
-            throw LibGit2Error.pushFailed("Unknown push error")
+
+            // 如果没有具体的错误消息，提供通用说明
+            if errorMessage == "Unknown push error" || errorMessage.isEmpty {
+                errorMessage = "Push failed - please check your credentials and network connection"
+            }
+
+            os_log("❌ LibGit2: Push failed with code %d: %{public}@", result_strarray, errorMessage)
+            throw LibGit2Error.pushFailed(errorMessage)
         }
 
         os_log("🐚 LibGit2: Push completed successfully")
