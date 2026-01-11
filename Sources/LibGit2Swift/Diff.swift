@@ -408,7 +408,9 @@ extension LibGit2 {
 
             if git_commit_lookup(&parentCommit, repo, &parentOid) == 0, let parentCommitPtr = parentCommit {
                 do {
-                    beforeContent = try getFileContent(atCommit: git_oid_tostr(&parentOid)!, file: filePath, at: repoPath)
+                    let hashPtr = git_oid_tostr_s(&parentOid)
+                    let parentCommitHash = String(cString: hashPtr)
+                    beforeContent = try getFileContent(atCommit: parentCommitHash, file: filePath, at: repoPath)
                 } catch {
                     // 文件可能在父commit中不存在，这是正常情况
                     beforeContent = nil
@@ -445,7 +447,8 @@ extension LibGit2 {
 
         var headOID = git_oid()
         if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-            let headCommitHash = String(cString: git_oid_tostr(&headOID))
+            let hashPtr = git_oid_tostr_s(&headOID)
+            let headCommitHash = String(cString: hashPtr)
             do {
                 beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
             } catch {
