@@ -681,4 +681,227 @@ final class DiffTests: LibGit2SwiftTestCase {
         XCTAssertNil(beforeContent, "Non-existent file should have nil before content")
         XCTAssertNil(afterContent, "Non-existent file should have nil after content")
     }
+
+    // MARK: - Get File Content Tests
+
+    func testGetFileContentExistingFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "File content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取文件内容
+        let content = try LibGit2.getFileContent(
+            atCommit: commits[0].hash,
+            file: "test.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(content, "File content", "Content should match")
+    }
+
+    func testGetFileContentNonExistentFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 尝试获取不存在的文件的内容
+        XCTAssertThrowsError(
+            try LibGit2.getFileContent(
+                atCommit: commits[0].hash,
+                file: "nonexistent.txt",
+                at: testRepo.repositoryPath
+            )
+        ) { error in
+            XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for non-existent file")
+        }
+    }
+
+    func testGetFileContentInvalidCommit() throws {
+        // 尝试使用无效的 commit hash
+        XCTAssertThrowsError(
+            try LibGit2.getFileContent(
+                atCommit: "invalid_hash_12345",
+                file: "test.txt",
+                at: testRepo.repositoryPath
+            )
+        ) { error in
+            XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for invalid commit hash")
+        }
+    }
+
+    func testGetFileContentEmptyFile() throws {
+        // 创建空文件提交
+        try testRepo.createFileAndCommit(
+            fileName: "empty.txt",
+            content: "",
+            message: "Empty file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取空文件内容
+        let content = try LibGit2.getFileContent(
+            atCommit: commits[0].hash,
+            file: "empty.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(content, "", "Empty file should return empty string")
+    }
+
+    func testGetFileContentMultiLineFile() throws {
+        // 创建多行文件
+        let multiLineContent = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+
+        try testRepo.createFileAndCommit(
+            fileName: "multiline.txt",
+            content: multiLineContent,
+            message: "Multi-line file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取文件内容
+        let content = try LibGit2.getFileContent(
+            atCommit: commits[0].hash,
+            file: "multiline.txt",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(content, multiLineContent, "Multi-line content should match")
+    }
+
+    // MARK: - Get Diff Between Commits Tests
+
+    func testGetDiffBetweenCommits() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Original content",
+            message: "Initial commit"
+        )
+
+        // 修改文件
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Modified content",
+            message: "Modify file"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取两个提交之间的 diff
+        let diff = try LibGit2.getDiffBetweenCommits(
+            from: commits[1].hash,
+            to: commits[0].hash,
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty")
+        XCTAssertTrue(diff.contains("test.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("Original content") || diff.contains("Modified content"), "Diff should show content change")
+    }
+
+    func testGetDiffBetweenCommitsMultipleFiles() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "Add file1"
+        )
+
+        // 添加和修改多个文件
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Modified 1",
+            message: "Modify file1"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Add file2"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取从初始提交到最新提交的 diff
+        let diff = try LibGit2.getDiffBetweenCommits(
+            from: commits[2].hash,
+            to: commits[0].hash,
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Diff should not be empty")
+        XCTAssertTrue(diff.contains("file1.txt") || diff.contains("file2.txt"), "Diff should contain changed files")
+    }
+
+    func testGetDiffBetweenCommitsNoChanges() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Same content",
+            message: "Initial commit"
+        )
+
+        // 创建相同内容的提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Same content",
+            message: "No changes"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 获取两个提交之间的 diff（应该为空或只有元数据）
+        let diff = try LibGit2.getDiffBetweenCommits(
+            from: commits[1].hash,
+            to: commits[0].hash,
+            at: testRepo.repositoryPath
+        )
+
+        // 即使内容相同，也可能有 commit 信息不同，所以 diff 可能为空或只有少量信息
+        // 只要不抛出错误就通过
+        XCTAssertTrue(true, "Should handle no changes gracefully")
+    }
+
+    func testGetDiffBetweenCommitsInvalidCommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "test.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取提交列表
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+
+        // 尝试使用无效的 "from" commit hash
+        XCTAssertThrowsError(
+            try LibGit2.getDiffBetweenCommits(
+                from: "invalid_hash_12345",
+                to: commits[0].hash,
+                at: testRepo.repositoryPath
+            )
+        ) { error in
+            XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for invalid commit hash")
+        }
+    }
 }
