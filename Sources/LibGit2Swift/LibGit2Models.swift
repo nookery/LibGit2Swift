@@ -90,3 +90,40 @@ public struct GitTag: Identifiable, Codable, Hashable {
         self.commitHash = commitHash
     }
 }
+
+// MARK: - GitCommit 扩展
+
+/// GitCommit 的 Co-Authored-By 支持扩展
+public extension GitCommit {
+    /// 从提交消息中解析的共同作者列表
+    var coAuthors: [String] {
+        parseCoAuthors(from: body.isEmpty ? message : body)
+    }
+
+    /// 所有作者的格式化字符串（主要作者 + 共同作者）
+    var allAuthors: String {
+        let all = [author] + coAuthors
+        return all.joined(separator: " + ")
+    }
+
+    /// 解析 Co-Authored-By 信息的私有方法
+    /// - Parameter text: 要解析的文本
+    /// - Returns: 共同作者名称数组
+    private func parseCoAuthors(from text: String) -> [String] {
+        let lines = text.split(separator: "\n")
+        return lines.compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.lowercased().starts(with: "co-authored-by:") {
+                // 解析 "Co-Authored-By: Name <email>" 格式
+                let authorPart = trimmed.dropFirst("Co-Authored-By:".count).trimmingCharacters(in: .whitespaces)
+                // 提取姓名部分（去掉邮箱）
+                if let angleBracketIndex = authorPart.firstIndex(of: "<") {
+                    let name = authorPart[..<angleBracketIndex].trimmingCharacters(in: .whitespaces)
+                    return name.isEmpty ? nil : name
+                }
+                return authorPart
+            }
+            return nil
+        }
+    }
+}
