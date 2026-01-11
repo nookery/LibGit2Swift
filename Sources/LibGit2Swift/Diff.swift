@@ -372,6 +372,106 @@ extension LibGit2 {
         throw LibGit2Error.invalidValue
     }
 
+    /// 获取指定提交中文件变更的前后内容
+    /// - Parameters:
+    ///   - commitHash: 提交哈希
+    ///   - filePath: 文件路径
+    ///   - repoPath: 仓库路径
+    /// - Returns: 元组 (before: 修改前的内容, after: 修改后的内容)
+    public static func getFileContentChange(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
+        let repo = try openRepository(at: repoPath)
+        defer { git_repository_free(repo) }
+
+        // 获取指定commit
+        var oid = git_oid()
+        guard git_oid_fromstr(&oid, commitHash) == 0 else {
+            throw LibGit2Error.invalidValue
+        }
+
+        var commit: OpaquePointer? = nil
+        defer { if commit != nil { git_commit_free(commit) } }
+
+        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
+            throw LibGit2Error.invalidValue
+        }
+
+        // 获取该commit的父commit（用于获取修改前的内容）
+        let parentCount = git_commit_parentcount(commitPtr)
+        var beforeContent: String? = nil
+
+        if parentCount > 0 {
+            // 有父commit，从父commit获取文件内容
+            var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+
+            var parentCommit: OpaquePointer? = nil
+            defer { if parentCommit != nil { git_commit_free(parentCommit) } }
+
+            if git_commit_lookup(&parentCommit, repo, &parentOid) == 0, let parentCommitPtr = parentCommit {
+                do {
+                    beforeContent = try getFileContent(atCommit: git_oid_tostr(&parentOid)!, file: filePath, at: repoPath)
+                } catch {
+                    // 文件可能在父commit中不存在，这是正常情况
+                    beforeContent = nil
+                }
+            }
+        } else {
+            // 初始提交，没有修改前内容
+            beforeContent = nil
+        }
+
+        // 从当前commit获取文件内容（修改后的内容）
+        var afterContent: String? = nil
+        do {
+            afterContent = try getFileContent(atCommit: commitHash, file: filePath, at: repoPath)
+        } catch {
+            // 文件被删除，这是正常情况
+            afterContent = nil
+        }
+
+        return (beforeContent, afterContent)
+    }
+
+    /// 获取未提交文件的前后内容
+    /// - Parameters:
+    ///   - filePath: 文件路径
+    ///   - repoPath: 仓库路径
+    /// - Returns: 元组 (before: HEAD中的内容, after: 工作区中的内容)
+    public static func getUncommittedFileContentChange(for filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
+        let repo = try openRepository(at: repoPath)
+        defer { git_repository_free(repo) }
+
+        // 获取HEAD commit（用于获取修改前的内容）
+        var beforeContent: String? = nil
+
+        var headOID = git_oid()
+        if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+            let headCommitHash = String(cString: git_oid_tostr(&headOID))
+            do {
+                beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
+            } catch {
+                // 文件在HEAD中不存在（新文件），这是正常情况
+                beforeContent = nil
+            }
+        }
+
+        // 从工作区获取文件内容（修改后的内容）
+        var afterContent: String? = nil
+        let fullPath = URL(fileURLWithPath: repoPath).appendingPathComponent(filePath).path
+
+        if FileManager.default.fileExists(atPath: fullPath) {
+            do {
+                afterContent = try String(contentsOfFile: fullPath, encoding: .utf8)
+            } catch {
+                afterContent = nil
+            }
+        } else {
+            // 文件被删除
+            afterContent = nil
+        }
+
+        return (beforeContent, afterContent)
+    }
+
     // MARK: - 私有辅助方法
 
     /// 解析差异文件列表
