@@ -73,13 +73,13 @@ Add LibGit2Swift as a dependency in your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Coffic/LibGit2Swift.git", from: "1.0.0")
+    .package(url: "https://github.com/nookery/LibGit2Swift.git", from: "1.0.0")
 ]
 ```
 
 Or add it via Xcode:
 1. File → Add Package Dependencies
-2. Enter the repository URL: `https://github.com/Coffic/LibGit2Swift.git`
+2. Enter the repository URL: `https://github.com/nookery/LibGit2Swift.git`
 3. Select the version rule
 
 ## Usage

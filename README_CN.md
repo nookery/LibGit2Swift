@@ -73,13 +73,13 @@ LibGit2Swift 是一个 Swift 库，封装了 libgit2 C 库，提供了清晰、�
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Coffic/LibGit2Swift.git", from: "1.0.0")
+    .package(url: "https://github.com/nookery/LibGit2Swift.git", from: "1.0.0")
 ]
 ```
 
 或者通过 Xcode 添加：
 1. File → Add Package Dependencies
-2. 输入仓库 URL：`https://github.com/Coffic/LibGit2Swift.git`
+2. 输入仓库 URL：`https://github.com/nookery/LibGit2Swift.git`
 3. 选择版本规则
 
 ## 使用方法
