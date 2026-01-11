@@ -478,6 +478,120 @@ extension LibGit2 {
         return (beforeContent, afterContent)
     }
 
+    /// 获取指定提交中特定文件的差异字符串
+    /// - Parameters:
+    ///   - commitHash: 提交哈希
+    ///   - filePath: 文件路径
+    ///   - repoPath: 仓库路径
+    /// - Returns: git diff 格式的字符串
+    public static func getFileDiff(atCommit commitHash: String, for filePath: String, at repoPath: String) throws -> String {
+        let repo = try openRepository(at: repoPath)
+        defer { git_repository_free(repo) }
+
+        // 获取指定 commit
+        var oid = git_oid()
+        guard git_oid_fromstr(&oid, commitHash) == 0 else {
+            throw LibGit2Error.invalidValue
+        }
+
+        var commit: OpaquePointer? = nil
+        defer { if commit != nil { git_commit_free(commit) } }
+
+        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
+            throw LibGit2Error.invalidValue
+        }
+
+        // 获取父 commit（用于比较）
+        let parentCount = git_commit_parentcount(commitPtr)
+        var diff: OpaquePointer? = nil
+        defer { if diff != nil { git_diff_free(diff) } }
+
+        if parentCount == 0 {
+            // 初始提交，与空树比较
+            var diffOpts = git_diff_options()
+            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+
+            // 设置 pathspec 只包含目标文件
+            let filePathCStr = strdup(filePath)
+            var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
+            strings.withUnsafeMutableBufferPointer { buffer in
+                diffOpts.pathspec.strings = buffer.baseAddress
+                diffOpts.pathspec.count = 1
+            }
+            defer { free(filePathCStr) }
+
+            var commitTree: OpaquePointer? = nil
+            defer { if commitTree != nil { git_tree_free(commitTree) } }
+            guard git_commit_tree(&commitTree, commitPtr) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
+
+            git_diff_tree_to_tree(&diff, repo, nil, commitTree, &diffOpts)
+        } else {
+            // 获取第一个父 commit
+            var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+
+            var parentCommit: OpaquePointer? = nil
+            defer { if parentCommit != nil { git_commit_free(parentCommit) } }
+
+            guard git_commit_lookup(&parentCommit, repo, &parentOid) == 0,
+                  let parentCommitPtr = parentCommit else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var parentTree: OpaquePointer? = nil
+            var commitTree: OpaquePointer? = nil
+            defer {
+                if parentTree != nil { git_tree_free(parentTree) }
+                if commitTree != nil { git_tree_free(commitTree) }
+            }
+
+            guard git_commit_tree(&parentTree, parentCommitPtr) == 0,
+                  git_commit_tree(&commitTree, commitPtr) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var diffOpts = git_diff_options()
+            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+
+            // 设置 pathspec 只包含目标文件
+            let filePathCStr = strdup(filePath)
+            var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
+            strings.withUnsafeMutableBufferPointer { buffer in
+                diffOpts.pathspec.strings = buffer.baseAddress
+                diffOpts.pathspec.count = 1
+            }
+            defer { free(filePathCStr) }
+
+            git_diff_tree_to_tree(&diff, repo, parentTree, commitTree, &diffOpts)
+        }
+
+        guard let diffPtr = diff else {
+            return ""
+        }
+
+        // 生成 patch
+        var patch: OpaquePointer? = nil
+        defer { if patch != nil { git_patch_free(patch) } }
+
+        let count = git_diff_num_deltas(diffPtr)
+        var patchText = ""
+
+        for i in 0..<count {
+            if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
+                var buf = git_buf()
+                defer { git_buf_dispose(&buf) }
+
+                if git_patch_to_buf(&buf, patchPtr) == 0 {
+                    let content = String(cString: buf.ptr)
+                    patchText += content
+                }
+            }
+        }
+
+        return patchText
+    }
+
     // MARK: - 私有辅助方法
 
     /// 解析差异文件列表
