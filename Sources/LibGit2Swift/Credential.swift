@@ -216,7 +216,63 @@ public let gitCredentialCallback: @convention(c) (
     }
 
     if allowed_types & GIT_CREDENTIAL_SSH_KEY.rawValue != 0 {
-        // TODO: 实现SSH密钥认证
+        // SSH 密钥认证
+        // 从 URL 中提取用户名（例如 git@github.com 中的 "git"）
+        let defaultUsername = username_from_url.map { String(cString: $0) } ?? "git"
+
+        // 尝试常见的 SSH 密钥路径
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        let sshDir = homeDir + "/.ssh"
+        let possibleKeys = [
+            ("id_ed25519", ""),
+            ("id_rsa", ""),
+            ("id_ecdsa", ""),
+            ("id_dsa", "")
+        ]
+
+        for (keyName, passphrase) in possibleKeys {
+            let publicKeyPath = "\(sshDir)/\(keyName).pub"
+            let privateKeyPath = "\(sshDir)/\(keyName)"
+
+            // 检查私钥文件是否存在
+            guard FileManager.default.fileExists(atPath: privateKeyPath) else {
+                continue
+            }
+
+            // 使用默认的 SSH 密钥创建凭据
+            let result = defaultUsername.withCString { usernamePtr in
+                publicKeyPath.withCString { publicKeyPtr in
+                    privateKeyPath.withCString { privateKeyPtr in
+                        passphrase.withCString { passphrasePtr in
+                            git_credential_ssh_key_new(outPointer, usernamePtr, publicKeyPtr, privateKeyPtr, passphrasePtr)
+                        }
+                    }
+                }
+            }
+
+            if result == 0 {
+                if CredentialManager.verboseCredentialCallback {
+                    os_log("🔑 SSH credential created with key: \(keyName)")
+                }
+                return 0
+            }
+        }
+    }
+
+    // 尝试 SSH agent（如果可用）
+    if allowed_types & GIT_CREDENTIAL_SSH_MEMORY.rawValue != 0 {
+        // 尝试使用内存中的凭据（例如从 SSH agent）
+        let defaultUsername = username_from_url.map { String(cString: $0) } ?? "git"
+
+        let result = defaultUsername.withCString { usernamePtr in
+            // 对于 SSH agent，我们可以尝试使用 SSH 自定义凭据类型
+            // 但 libgit2 没有直接支持 SSH agent，所以这里返回错误让用户手动配置
+            -1
+        }
+
+        if result == 0 {
+            return 0
+        }
     }
 
     return Int32(GIT_EUSER.rawValue)
