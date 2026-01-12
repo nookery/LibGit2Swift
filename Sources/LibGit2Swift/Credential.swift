@@ -13,6 +13,12 @@ public class CredentialManager {
     /// - Parameter urlString: Git远程URL
     /// - Returns: 用户名和密码元组，如果未找到则返回nil
     public static func getCredentialFromKeychain(for urlString: String) -> (username: String, password: String)? {
+        // 检查 urlString 是否有效
+        guard !urlString.isEmpty else {
+            os_log("❌ URL string is empty in getCredentialFromKeychain", log: logger, type: .error)
+            return nil
+        }
+
         // 从URL中提取host
         guard let url = URL(string: urlString) else {
             os_log("❌ Invalid URL: %{public}@", log: logger, type: .error, urlString)
@@ -24,8 +30,8 @@ public class CredentialManager {
 
         os_log("🔑 Looking up credentials for host: %{public}@", log: logger, type: .info, host)
 
-        // 构建Keychain查询
-        let query: [String: Any] = [
+        // 首先尝试精确匹配（包含 protocol）
+        var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrServer as String: host,
             kSecAttrProtocol as String: `protocol`,
@@ -35,14 +41,37 @@ public class CredentialManager {
         ]
 
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        var status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess,
-              let item = result as? [String: Any],
-              let username = item[kSecAttrAccount as String] as? String,
-              let passwordData = item[kSecValueData as String] as? Data,
-              let password = String(data: passwordData, encoding: .utf8) else {
-            os_log("❌ No credentials found in Keychain for host: %{public}@", log: logger, type: .error, host)
+        // 如果精确匹配失败，尝试只匹配 server（不指定 protocol）
+        if status != errSecSuccess {
+            os_log("🔍 Exact match failed (status: %d), trying without protocol filter", log: logger, type: .debug, status)
+            query.removeValue(forKey: kSecAttrProtocol as String)
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+        }
+
+        guard status == errSecSuccess else {
+            os_log("❌ SecItemCopyMatching failed with status: %d", log: logger, type: .error, status)
+            return nil
+        }
+
+        guard let item = result as? [String: Any] else {
+            os_log("❌ Failed to cast result to dictionary", log: logger, type: .error)
+            return nil
+        }
+
+        guard let username = item[kSecAttrAccount as String] as? String else {
+            os_log("❌ No username found in Keychain item", log: logger, type: .error)
+            return nil
+        }
+
+        guard let passwordData = item[kSecValueData as String] as? Data else {
+            os_log("❌ No password data found in Keychain item", log: logger, type: .error)
+            return nil
+        }
+
+        guard let password = String(data: passwordData, encoding: .utf8) else {
+            os_log("❌ Failed to convert password data to string", log: logger, type: .error)
             return nil
         }
 
@@ -135,40 +164,64 @@ public let gitCredentialCallback: @convention(c) (
     UInt32,
     UnsafeMutableRawPointer?
 ) -> Int32 = { out, url, username_from_url, allowed_types, payload in
-    guard let urlPointer = url else {
+    // 检查 out 指针是否有效
+    guard let outPointer = out else {
+        os_log("❌ Credential callback: out pointer is NULL", log: CredentialManager.logger, type: .error)
         return -1
     }
 
-    let urlString = String(cString: urlPointer)
-    os_log("🔐 Credential callback invoked for: %{public}@", log: CredentialManager.logger, type: .info, urlString)
-    os_log("🔐 Allowed credential types: %{public}@", log: CredentialManager.logger, type: .debug, allowed_types)
+    guard let urlPointer = url else {
+        os_log("❌ Credential callback: url pointer is NULL", log: CredentialManager.logger, type: .error)
+        return -1
+    }
+
+    // 使用更安全的方式创建字符串，限制最大长度
+    let maxURLLength = 2048
+    var urlBuffer = [CChar](repeating: 0, count: maxURLLength)
+    strncpy(&urlBuffer, urlPointer, maxURLLength - 1)
+    let urlString = String(cString: urlBuffer)
+
+    os_log("🔐 Credential callback invoked, URL length: %d", log: CredentialManager.logger, type: .info, urlString.count)
+    os_log("🔐 URL (first 100 chars): %{public}@", log: CredentialManager.logger, type: .info, String(urlString.prefix(100)))
+    os_log("🔐 Allowed credential types: %u", log: CredentialManager.logger, type: .debug, allowed_types)
+
+    // 检查 urlString 是否有效
+    guard !urlString.isEmpty else {
+        os_log("❌ URL string is empty", log: CredentialManager.logger, type: .error)
+        return Int32(GIT_EUSER.rawValue)
+    }
 
     // 从Keychain或git helper获取凭据
+    os_log("🔍 About to call getCredential", log: CredentialManager.logger, type: .debug)
+
     guard let (username, password) = CredentialManager.getCredential(for: urlString) else {
-        os_log("❌ No credentials found for: %{public}@", log: CredentialManager.logger, type: .error, urlString)
-        os_log("💡 Hint: You can add credentials using 'git credential approve' or Keychain Access", log: CredentialManager.logger, type: .info)
+        os_log("❌ No credentials found", log: CredentialManager.logger, type: .error)
+        os_log("💡 Hint: Please add credentials using the credential input dialog", log: CredentialManager.logger, type: .info)
         return Int32(GIT_EUSER.rawValue)
     }
 
     os_log("✅ Found credentials for user: %{public}@", log: CredentialManager.logger, type: .info, username)
 
+    // 检查用户名和密码是否为空
+    guard !username.isEmpty && !password.isEmpty else {
+        os_log("❌ Username or password is empty", log: CredentialManager.logger, type: .error)
+        return Int32(GIT_EUSER.rawValue)
+    }
+
     // 根据allowed_types选择合适的凭据类型
     if allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 {
         os_log("🔑 Using user/pass plaintext authentication", log: CredentialManager.logger, type: .debug)
 
-        // 使用明文用户名/密码
+        // 创建凭证对象
+        // git_credential_userpass_plaintext_new 会使用 strdup 在内部复制字符串
         let result = username.withCString { usernamePtr in
             password.withCString { passwordPtr in
-                git_credential_userpass_plaintext_new(
-                    out,
-                    usernamePtr,
-                    passwordPtr
-                )
+                git_credential_userpass_plaintext_new(outPointer, usernamePtr, passwordPtr)
             }
         }
 
         if result == 0 {
-            os_log("✅ Successfully created userpass credential for: %{public}@", log: CredentialManager.logger, type: .info, username)
+            os_log("✅ Successfully created userpass credential", log: CredentialManager.logger, type: .info)
             return 0
         } else {
             os_log("❌ Failed to create credential, error code: %d", log: CredentialManager.logger, type: .error, result)
