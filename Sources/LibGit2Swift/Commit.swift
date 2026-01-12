@@ -237,7 +237,8 @@ extension LibGit2 {
         // 获取提交信息
         let messagePtr = git_commit_message(commit)
         let message = messagePtr != nil ? String(cString: messagePtr!) : ""
-        let body = message
+        let bodyPtr = git_commit_body(commit)
+        let body = bodyPtr != nil ? String(cString: bodyPtr!) : ""
         let shortMessage = message.components(separatedBy: "\n").first ?? message
 
         // 获取引用
