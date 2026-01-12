@@ -11,7 +11,7 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 创建的提交哈希
     public static func createCommit(message: String, at path: String, verbose: Bool = true) throws -> String {
-        if verbose { os_log("🐚 LibGit2: Creating commit with message: %{public}@", message) }
+        if verbose { os_log("\(self.t)Creating commit with message: \(message)") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -102,7 +102,7 @@ extension LibGit2 {
         }
 
         let commitHash = oidToString(commitOID)
-        if verbose { os_log("🐚 LibGit2: Commit created successfully: %{public}@", commitHash) }
+        if verbose { os_log("\(self.t)Commit created successfully: \(commitHash)") }
 
         return commitHash
     }
@@ -113,9 +113,10 @@ extension LibGit2 {
     ///   - message: 提交信息
     ///   - path: 仓库路径
     /// - Returns: 创建的提交哈希
-    static func addAndCommit(files: [String], message: String, at path: String) throws -> String {
+    static func addAndCommit(files: [String], message: String, at path: String, verbose: Bool = true) throws -> String {
+        if verbose { os_log("\(self.t)Adding and committing files: \(files)") }
         try addFiles(files, at: path)
-        return try createCommit(message: message, at: path)
+        return try createCommit(message: message, at: path, verbose: verbose)
     }
 
     /// 修改最后一次提交（amend）
@@ -123,7 +124,8 @@ extension LibGit2 {
     ///   - message: 新的提交信息（nil 表示不修改）
     ///   - path: 仓库路径
     /// - Returns: 新的提交哈希
-    static func amendCommit(message: String? = nil, at path: String) throws -> String {
+        static func amendCommit(message: String? = nil, at path: String, verbose: Bool = true) throws -> String {
+        if verbose { os_log("\(self.t)Amending commit with message: \(message ?? "nil")") }
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 

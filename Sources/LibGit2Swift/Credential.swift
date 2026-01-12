@@ -1,13 +1,14 @@
 import Foundation
 import Clibgit2
 import OSLog
+import MagicLog
 import Security
 
 // MARK: - Credential Manager
 
 /// 管理Git凭据的辅助类
-public class CredentialManager {
-    static let logger = OSLog(subsystem: "com.coffic.LibGit2Swift", category: "Credential")
+public class CredentialManager: SuperLog {
+    public static let emoji = "🔑"
 
     /// 控制凭据回调函数的日志输出
     public static var verboseCredentialCallback: Bool = true
@@ -18,21 +19,21 @@ public class CredentialManager {
     public static func getCredentialFromKeychain(for urlString: String, verbose: Bool = true) -> (username: String, password: String)? {
         // 检查 urlString 是否有效
         guard !urlString.isEmpty else {
-            if verbose { os_log("❌ URL string is empty in getCredentialFromKeychain", log: logger, type: .error) }
+            if verbose { os_log("\(t) URL string is empty in getCredentialFromKeychain") }
             return nil
         }
 
 
         // 从URL中提取host
         guard let url = URL(string: urlString) else {
-            if verbose { os_log("❌ Invalid URL: %{public}@", log: logger, type: .error, urlString) }
+            if verbose { os_log("\(t) Invalid URL: \(urlString)") }
             return nil
         }
 
         let host = url.host ?? urlString
         let `protocol` = url.scheme ?? "https"
 
-        if verbose { os_log("🔑 Looking up credentials for host: %{public}@", log: logger, type: .info, host) }
+        if verbose { os_log("\(t) Looking up credentials for host: \(host)") }
 
         // 首先尝试精确匹配（包含 protocol）
         var query: [String: Any] = [
@@ -49,37 +50,37 @@ public class CredentialManager {
 
         // 如果精确匹配失败，尝试只匹配 server（不指定 protocol）
         if status != errSecSuccess {
-            if verbose { os_log("🔍 Exact match failed (status: %d), trying without protocol filter", log: logger, type: .debug, status) }
+            if verbose { os_log("\(t) Exact match failed (status: \(status)), trying without protocol filter") }
             query.removeValue(forKey: kSecAttrProtocol as String)
             status = SecItemCopyMatching(query as CFDictionary, &result)
         }
 
         guard status == errSecSuccess else {
-            if verbose { os_log("❌ SecItemCopyMatching failed with status: %d", log: logger, type: .error, status) }
+            if verbose { os_log("\(t) SecItemCopyMatching failed with status: \(status)") }
             return nil
         }
 
         guard let item = result as? [String: Any] else {
-            if verbose { os_log("❌ Failed to cast result to dictionary", log: logger, type: .error) }
+            if verbose { os_log("\(t) Failed to cast result to dictionary") }
             return nil
         }
 
         guard let username = item[kSecAttrAccount as String] as? String else {
-            if verbose { os_log("❌ No username found in Keychain item", log: logger, type: .error) }
+            if verbose { os_log("\(t) No username found in Keychain item") }
             return nil
         }
 
         guard let passwordData = item[kSecValueData as String] as? Data else {
-            if verbose { os_log("❌ No password data found in Keychain item", log: logger, type: .error) }
+            if verbose { os_log("\(t) No password data found in Keychain item") }
             return nil
         }
 
         guard let password = String(data: passwordData, encoding: .utf8) else {
-            if verbose { os_log("❌ Failed to convert password data to string", log: logger, type: .error) }
+            if verbose { os_log("\(t) Failed to convert password data to string") }
             return nil
         }
 
-        if verbose { os_log("✅ Found credentials in Keychain for user: %{public}@", log: logger, type: .info, username) }
+        if verbose { os_log("\(t) Found credentials in Keychain for user: \(username)") }
         return (username, password)
     }
 
@@ -90,7 +91,7 @@ public class CredentialManager {
         // 实现git credential fill协议
         // 这是一个fallback方案，如果Keychain中没有找到凭据
 
-        if verbose { os_log("🔍 Attempting to use git credential helper for: %{public}@", log: logger, type: .info, urlString) }
+        if verbose { os_log("\(t) Attempting to use git credential helper for: \(urlString)") }
 
         // TODO: 实现与git credential helper的通信
         // 这需要通过Process调用git credential fill
@@ -118,7 +119,7 @@ public class CredentialManager {
     ///   - urlString: Git远程URL
     public static func saveCredentialToKeychain(username: String, password: String, for urlString: String, verbose: Bool = true) {
         guard let url = URL(string: urlString) else {
-            if verbose { os_log("❌ Invalid URL for saving credential: %{public}@", log: logger, type: .error, urlString) }
+                if verbose { os_log("\(t) Invalid URL for saving credential: \(urlString)") }
             return
         }
 
@@ -142,9 +143,9 @@ public class CredentialManager {
         let status = SecItemAdd(query as CFDictionary, nil)
 
         if status == errSecSuccess {
-            if verbose { os_log("✅ Credentials saved to Keychain for user: %{public}@", log: logger, type: .info, username) }
+            if verbose { os_log("\(t) Credentials saved to Keychain for user: \(username)") }
         } else {
-            if verbose { os_log("❌ Failed to save credentials to Keychain: %d", log: logger, type: .error, status) }
+            if verbose { os_log("\(t) Failed to save credentials to Keychain: \(status)") }
         }
     }
 }
@@ -170,12 +171,10 @@ public let gitCredentialCallback: @convention(c) (
 ) -> Int32 = { out, url, username_from_url, allowed_types, payload in
     // 检查 out 指针是否有效
     guard let outPointer = out else {
-        if CredentialManager.verboseCredentialCallback { os_log("❌ Credential callback: out pointer is NULL", log: CredentialManager.logger, type: .error) }
         return -1
     }
 
     guard let urlPointer = url else {
-        if CredentialManager.verboseCredentialCallback { os_log("❌ Credential callback: url pointer is NULL", log: CredentialManager.logger, type: .error) }
         return -1
     }
 
@@ -185,41 +184,22 @@ public let gitCredentialCallback: @convention(c) (
     strncpy(&urlBuffer, urlPointer, maxURLLength - 1)
     let urlString = String(cString: urlBuffer)
 
-    if CredentialManager.verboseCredentialCallback {
-        os_log("🔐 Credential callback invoked, URL length: %d", log: CredentialManager.logger, type: .info, urlString.count)
-        os_log("🔐 URL (first 100 chars): %{public}@", log: CredentialManager.logger, type: .info, String(urlString.prefix(100)))
-        os_log("🔐 Allowed credential types: %u", log: CredentialManager.logger, type: .debug, allowed_types)
-    }
-
     // 检查 urlString 是否有效
     guard !urlString.isEmpty else {
-        if CredentialManager.verboseCredentialCallback { os_log("❌ URL string is empty", log: CredentialManager.logger, type: .error) }
         return Int32(GIT_EUSER.rawValue)
     }
-
-    // 从Keychain或git helper获取凭据
-    if CredentialManager.verboseCredentialCallback { os_log("🔍 About to call getCredential", log: CredentialManager.logger, type: .debug) }
 
     guard let (username, password) = CredentialManager.getCredential(for: urlString, verbose: CredentialManager.verboseCredentialCallback) else {
-        if CredentialManager.verboseCredentialCallback {
-            os_log("❌ No credentials found", log: CredentialManager.logger, type: .error)
-            os_log("💡 Hint: Please add credentials using the credential input dialog", log: CredentialManager.logger, type: .info)
-        }
         return Int32(GIT_EUSER.rawValue)
     }
-
-    if CredentialManager.verboseCredentialCallback { os_log("✅ Found credentials for user: %{public}@", log: CredentialManager.logger, type: .info, username) }
 
     // 检查用户名和密码是否为空
     guard !username.isEmpty && !password.isEmpty else {
-        if CredentialManager.verboseCredentialCallback { os_log("❌ Username or password is empty", log: CredentialManager.logger, type: .error) }
         return Int32(GIT_EUSER.rawValue)
     }
 
     // 根据allowed_types选择合适的凭据类型
     if allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 {
-        if CredentialManager.verboseCredentialCallback { os_log("🔑 Using user/pass plaintext authentication", log: CredentialManager.logger, type: .debug) }
-
         // 创建凭证对象
         // git_credential_userpass_plaintext_new 会使用 strdup 在内部复制字符串
         let result = username.withCString { usernamePtr in
@@ -229,19 +209,15 @@ public let gitCredentialCallback: @convention(c) (
         }
 
         if result == 0 {
-            if CredentialManager.verboseCredentialCallback { os_log("✅ Successfully created userpass credential", log: CredentialManager.logger, type: .info) }
             return 0
         } else {
-            if CredentialManager.verboseCredentialCallback { os_log("❌ Failed to create credential, error code: %d", log: CredentialManager.logger, type: .error, result) }
             return Int32(GIT_EUSER.rawValue)
         }
     }
 
     if allowed_types & GIT_CREDENTIAL_SSH_KEY.rawValue != 0 {
         // TODO: 实现SSH密钥认证
-        if CredentialManager.verboseCredentialCallback { os_log("⚠️ SSH key authentication requested but not yet implemented", log: CredentialManager.logger, type: .error) }
     }
 
-    os_log("❌ No supported credential type found in allowed_types: %u", log: CredentialManager.logger, type: .error, allowed_types)
     return Int32(GIT_EUSER.rawValue)
 }

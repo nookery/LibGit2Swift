@@ -11,7 +11,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func addFiles(_ files: [String], at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Adding files to staging area") }
+        if verbose { os_log("\(self.t)Adding files to staging area") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -120,7 +120,7 @@ extension LibGit2 {
             throw LibGit2Error.cannotGetIndex
         }
 
-        if verbose { os_log("🐚 LibGit2: Files added successfully") }
+        if verbose { os_log("\(self.t)Files added successfully") }
     }
 
     /// 添加单个文件到暂存区
