@@ -1,5 +1,5 @@
-import Foundation
 import Clibgit2
+import Foundation
 import OSLog
 
 /// LibGit2 提交写入操作扩展
@@ -10,14 +10,14 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 创建的提交哈希
-    public static func createCommit(message: String, at path: String, verbose: Bool = true) throws -> String {
+    public static func createCommit(message: String, at path: String, verbose: Bool) throws -> String {
         if verbose { os_log("\(self.t)Creating commit with message: \(message)") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
         // 1. 获取 index
-        var index: OpaquePointer? = nil
+        var index: OpaquePointer?
         defer { if index != nil { git_index_free(index) } }
 
         guard git_repository_index(&index, repo) == 0,
@@ -42,7 +42,7 @@ extension LibGit2 {
             throw LibGit2Error.cannotWriteTree
         }
 
-        var tree: OpaquePointer? = nil
+        var tree: OpaquePointer?
         defer { if tree != nil { git_tree_free(tree) } }
 
         guard git_tree_lookup(&tree, repo, &treeOID) == 0 else {
@@ -50,7 +50,7 @@ extension LibGit2 {
         }
 
         // 4. 获取 HEAD commit 作为父提交
-        var headCommit: OpaquePointer? = nil
+        var headCommit: OpaquePointer?
         var parents = [OpaquePointer?]()
         defer {
             for parent in parents {
@@ -59,7 +59,7 @@ extension LibGit2 {
                 }
             }
         }
-        
+
         var headOID = git_oid()
         if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
             if git_commit_lookup(&headCommit, repo, &headOID) == 0, let commit = headCommit {
@@ -69,8 +69,8 @@ extension LibGit2 {
         }
 
         // 5. 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path)
-        var signature: UnsafeMutablePointer<git_signature>? = nil
+        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
+        var signature: UnsafeMutablePointer<git_signature>?
         defer { if let sig = signature { git_signature_free(sig) } }
 
         let signResult = git_signature_now(&signature, userName, userEmail)
@@ -83,7 +83,7 @@ extension LibGit2 {
         // 6. 创建提交
         var commitOID = git_oid()
         let commitResult = parents.withUnsafeMutableBufferPointer { buffer in
-            return git_commit_create(
+            git_commit_create(
                 &commitOID,
                 repo,
                 "HEAD",
@@ -124,7 +124,7 @@ extension LibGit2 {
     ///   - message: 新的提交信息（nil 表示不修改）
     ///   - path: 仓库路径
     /// - Returns: 新的提交哈希
-        static func amendCommit(message: String? = nil, at path: String, verbose: Bool = true) throws -> String {
+    static func amendCommit(message: String? = nil, at path: String, verbose: Bool) throws -> String {
         if verbose { os_log("\(self.t)Amending commit with message: \(message ?? "nil")") }
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -135,7 +135,7 @@ extension LibGit2 {
             throw LibGit2Error.cannotGetHEAD
         }
 
-        var headCommit: OpaquePointer? = nil
+        var headCommit: OpaquePointer?
         defer { if headCommit != nil { git_commit_free(headCommit) } }
 
         guard git_commit_lookup(&headCommit, repo, &headOID) == 0,
@@ -144,7 +144,7 @@ extension LibGit2 {
         }
 
         // 获取当前 index tree
-        var index: OpaquePointer? = nil
+        var index: OpaquePointer?
         defer { if index != nil { git_index_free(index) } }
 
         guard git_repository_index(&index, repo) == 0 else {
@@ -156,7 +156,7 @@ extension LibGit2 {
             throw LibGit2Error.cannotWriteTree
         }
 
-        var tree: OpaquePointer? = nil
+        var tree: OpaquePointer?
         defer { if tree != nil { git_tree_free(tree) } }
 
         guard git_tree_lookup(&tree, repo, &treeOID) == 0 else {
@@ -174,16 +174,16 @@ extension LibGit2 {
             }
         }
 
-        for i in 0..<parentCount {
-            var parent: OpaquePointer? = nil
+        for i in 0 ..< parentCount {
+            var parent: OpaquePointer?
             if git_commit_parent(&parent, commit, i) == 0 {
                 parents.append(parent)
             }
         }
 
         // 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path)
-        var signature: UnsafeMutablePointer<git_signature>? = nil
+        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
+        var signature: UnsafeMutablePointer<git_signature>?
         defer { if let sig = signature { git_signature_free(sig) } }
         git_signature_now(&signature, userName, userEmail)
 
@@ -192,7 +192,7 @@ extension LibGit2 {
         let messageToUpdate = message ?? String(cString: git_commit_message(commit))
 
         let result = parents.withUnsafeMutableBufferPointer { buffer in
-            return git_commit_create(
+            git_commit_create(
                 &newCommitOID,
                 repo,
                 "HEAD",

@@ -48,7 +48,7 @@ extension LibGit2 {
     ///   - message: 标签信息（nil 表示轻量标签）
     ///   - commitHash: 提交哈希（nil 表示使用 HEAD）
     ///   - path: 仓库路径
-    public static func createTag(named name: String, message: String? = nil, at commitHash: String? = nil, in path: String, verbose: Bool = true) throws {
+    public static func createTag(named name: String, message: String? = nil, at commitHash: String? = nil, in path: String, verbose: Bool) throws {
         if verbose { os_log("🐚 LibGit2: Creating tag: %{public}@", name) }
 
         let repo = try openRepository(at: path)
@@ -76,7 +76,7 @@ extension LibGit2 {
         }
 
         // 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path)
+        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
         var signature: UnsafeMutablePointer<git_signature>? = nil
         defer { if let sig = signature { git_signature_free(sig) } }
         git_signature_now(&signature, userName, userEmail)

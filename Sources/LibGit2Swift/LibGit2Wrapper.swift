@@ -33,7 +33,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 配置值
-    public static func getConfig(key: String, at repoPath: String, verbose: Bool = true) throws -> String {
+    public static func getConfig(key: String, at repoPath: String, verbose: Bool) throws -> String {
         if verbose { os_log("\(t)Getting config for key: \(key) at path: \(repoPath)") }
 
         var repo: OpaquePointer?
@@ -95,7 +95,7 @@ public class LibGit2: SuperLog {
     ///   - value: 配置值
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    public static func setConfig(key: String, value: String, at repoPath: String, verbose: Bool = true) throws {
+    public static func setConfig(key: String, value: String, at repoPath: String, verbose: Bool) throws {
         if verbose { os_log("\(LibGit2.t)Setting config for key: \(key) at path: \(repoPath)") }
 
         let repo = try openRepository(at: repoPath)
@@ -132,7 +132,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: (用户名, 邮箱)元组
-    public static func getUserConfig(at repoPath: String, verbose: Bool = true) throws -> (name: String, email: String) {
+    public static func getUserConfig(at repoPath: String, verbose: Bool) throws -> (name: String, email: String) {
         let name = try getConfig(key: "user.name", at: repoPath, verbose: verbose)
         let email = try getConfig(key: "user.email", at: repoPath, verbose: verbose)
         return (name, email)
@@ -144,7 +144,7 @@ public class LibGit2: SuperLog {
     ///   - email: 用户邮箱
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    public static func setUserConfig(name: String, email: String, at repoPath: String, verbose: Bool = true) throws {
+    public static func setUserConfig(name: String, email: String, at repoPath: String, verbose: Bool) throws {
         try setConfig(key: "user.name", value: name, at: repoPath, verbose: verbose)
         try setConfig(key: "user.email", value: email, at: repoPath, verbose: verbose)
     }
@@ -152,9 +152,9 @@ public class LibGit2: SuperLog {
     /// 获取用户名
     /// - Parameters:
     ///   - repoPath: 仓库路径
-    ///   - verbose: 是否输出详细日志，默认为true
+    ///   - verbose: 是否输出详细日志
     /// - Returns: 用户名
-    public static func getUserName(at repoPath: String, verbose: Bool = true) throws -> String {
+    public static func getUserName(at repoPath: String, verbose: Bool) throws -> String {
         return try getConfig(key: "user.name", at: repoPath, verbose: verbose)
     }
 
