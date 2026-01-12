@@ -17,7 +17,7 @@ private struct NetworkCallbacks: SuperLog {
         let verbose = payload?.assumingMemoryBound(to: Bool.self).pointee ?? true
         let percent = total > 0 ? Float(current) / Float(total) * 100 : 0
         if verbose {
-            os_log("\(Self.t) Push progress: \(String(format: "%.1f", percent))%")
+            os_log("\(Self.t)Push progress: \(String(format: "%.1f", percent))%")
         }
         return 0
     }

@@ -33,7 +33,7 @@ public class CredentialManager: SuperLog {
         let host = url.host ?? urlString
         let `protocol` = url.scheme ?? "https"
 
-        if verbose { os_log("\(t) Looking up credentials for host: \(host)") }
+        if verbose { os_log("\(t)Looking up credentials for host: \(host)") }
 
         // 首先尝试精确匹配（包含 protocol）
         var query: [String: Any] = [
@@ -50,7 +50,7 @@ public class CredentialManager: SuperLog {
 
         // 如果精确匹配失败，尝试只匹配 server（不指定 protocol）
         if status != errSecSuccess {
-            if verbose { os_log("\(t) Exact match failed (status: \(status)), trying without protocol filter") }
+            if verbose { os_log("\(t)Exact match failed (status: \(status)), trying without protocol filter") }
             query.removeValue(forKey: kSecAttrProtocol as String)
             status = SecItemCopyMatching(query as CFDictionary, &result)
         }
@@ -80,7 +80,7 @@ public class CredentialManager: SuperLog {
             return nil
         }
 
-        if verbose { os_log("\(t) Found credentials in Keychain for user: \(username)") }
+        if verbose { os_log("\(t)Found credentials in Keychain for user: \(username)") }
         return (username, password)
     }
 
