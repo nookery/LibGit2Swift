@@ -1,6 +1,7 @@
 import Foundation
 @testable import LibGit2Swift
 import XCTest
+import Clibgit2
 
 /// Remote 相关功能的测试
 final class RemoteTests: LibGit2SwiftTestCase {
@@ -597,5 +598,278 @@ final class RemoteTests: LibGit2SwiftTestCase {
         // 验证远程仓库数量
         let remainingRemotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
         XCTAssertEqual(remainingRemotes.count, 2, "Should have 2 remotes after deletion")
+    }
+
+    // MARK: - Unpushed Commits Tests
+
+    /// 测试获取未推送的提交（有上游分支的情况）
+    func testGetUnPushedCommitsWithUpstream() throws {
+        // 创建初始提交（模拟远程状态）
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 如果 origin 远程仓库已存在，先删除它
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        if remotes.contains(where: { $0.name == "origin" }) {
+            try? LibGit2.removeRemote(name: "origin", at: testRepo.repositoryPath, verbose: false)
+        }
+
+        // 添加远程仓库
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/repo.git",
+                             at: testRepo.repositoryPath)
+
+        // 获取当前分支（应该是 main 或 master）
+        let currentBranch = try LibGit2.getCurrentBranchInfo(at: testRepo.repositoryPath)
+        let branchName = currentBranch?.name ?? "main"
+
+        // 创建远程跟踪分支（模拟远程仓库的状态）
+        // 这需要使用 libgit2 C API 来设置上游分支
+        try setupUpstreamBranch(branchName: branchName, upstreamName: "origin/main", at: testRepo.repositoryPath)
+
+        // 创建几个新的提交（这些提交应该被识别为未推送）
+        for i in 1...3 {
+            try testRepo.createFileAndCommit(
+                fileName: "file\(i).txt",
+                content: "Content \(i)",
+                message: "Commit \(i)"
+            )
+        }
+
+        // 获取未推送的提交
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+
+        // 应该有3个未推送的提交
+        XCTAssertEqual(unpushed.count, 3, "Should have 3 unpushed commits")
+
+        // 验证提交顺序（最新的在前）
+        XCTAssertEqual(unpushed[0].message, "Commit 3", "First commit should be the latest")
+        XCTAssertEqual(unpushed[2].message, "Commit 1", "Last commit should be the oldest")
+    }
+
+    /// 测试获取未推送的提交（没有上游分支的情况）
+    func testGetUnPushedCommitsNoUpstream() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 创建几个新的提交（不设置上游分支）
+        for i in 1...3 {
+            try testRepo.createFileAndCommit(
+                fileName: "file\(i).txt",
+                content: "Content \(i)",
+                message: "Commit \(i)"
+            )
+        }
+
+        // 获取未推送的提交（没有上游分支）
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+
+        // 应该返回空数组
+        XCTAssertEqual(unpushed.count, 0, "Should return empty array when no upstream branch")
+    }
+
+    /// 测试所有提交都已同步的情况
+    func testGetUnPushedCommitsAllSynced() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 如果 origin 远程仓库已存在，先删除它
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        if remotes.contains(where: { $0.name == "origin" }) {
+            try? LibGit2.removeRemote(name: "origin", at: testRepo.repositoryPath, verbose: false)
+        }
+
+        // 添加远程仓库
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/repo.git",
+                             at: testRepo.repositoryPath)
+
+        // 获取当前分支
+        let currentBranch = try LibGit2.getCurrentBranchInfo(at: testRepo.repositoryPath)
+        let branchName = currentBranch?.name ?? "main"
+
+        // 设置上游分支（指向当前HEAD，模拟所有提交都已推送）
+        try setupUpstreamBranch(branchName: branchName, upstreamName: "origin/main", at: testRepo.repositoryPath)
+
+        // 不创建新提交
+
+        // 获取未推送的提交
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+
+        // 应该返回空数组（所有提交都已同步）
+        XCTAssertEqual(unpushed.count, 0, "Should return empty array when all commits are synced")
+    }
+
+    /// 测试获取未拉取的提交数量
+    func testGetUnPulledCount() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 如果 origin 远程仓库已存在，先删除它
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        if remotes.contains(where: { $0.name == "origin" }) {
+            try? LibGit2.removeRemote(name: "origin", at: testRepo.repositoryPath, verbose: false)
+        }
+
+        // 添加远程仓库
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/repo.git",
+                             at: testRepo.repositoryPath)
+
+        // 获取当前分支
+        let currentBranch = try LibGit2.getCurrentBranchInfo(at: testRepo.repositoryPath)
+        let branchName = currentBranch?.name ?? "main"
+
+        // 设置上游分支
+        try setupUpstreamBranch(branchName: branchName, upstreamName: "origin/main", at: testRepo.repositoryPath)
+
+        // 在测试环境中，我们无法真正有未拉取的提交
+        // 但我们可以测试方法的调用不会崩溃
+        let unpulledCount = try LibGit2.getUnPulledCount(at: testRepo.repositoryPath)
+
+        // 应该返回0（没有未拉取的提交）
+        XCTAssertEqual(unpulledCount, 0, "Should return 0 when there are no unpulled commits")
+    }
+
+    /// 测试没有上游分支时获取未拉取的提交数量
+    func testGetUnPulledCountNoUpstream() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 不设置上游分支
+        // 获取未拉取的提交数量（没有上游分支）
+        let unpulledCount = try LibGit2.getUnPulledCount(at: testRepo.repositoryPath)
+
+        // 应该返回0
+        XCTAssertEqual(unpulledCount, 0, "Should return 0 when no upstream branch")
+    }
+
+    /// 测试大量提交时的性能
+    func testGetUnPushedCommitsWithLargeHistory() throws {
+        // 创建大量提交来测试性能
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 如果 origin 远程仓库已存在，先删除它
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        if remotes.contains(where: { $0.name == "origin" }) {
+            try? LibGit2.removeRemote(name: "origin", at: testRepo.repositoryPath, verbose: false)
+        }
+
+        // 添加远程仓库
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/repo.git",
+                             at: testRepo.repositoryPath)
+
+        // 获取当前分支
+        let currentBranch = try LibGit2.getCurrentBranchInfo(at: testRepo.repositoryPath)
+        let branchName = currentBranch?.name ?? "main"
+
+        // 设置上游分支（指向初始提交）
+        try setupUpstreamBranch(branchName: branchName, upstreamName: "origin/main", at: testRepo.repositoryPath)
+
+        // 创建50个新提交
+        let commitCount = 50
+        for i in 1...commitCount {
+            try testRepo.createFileAndCommit(
+                fileName: "file\(i).txt",
+                content: "Content \(i)",
+                message: "Commit \(i)"
+            )
+        }
+
+        // 获取未推送的提交
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+
+        // 验证数量
+        XCTAssertEqual(unpushed.count, commitCount,
+                      "Should have \(commitCount) unpushed commits")
+
+        // 验证顺序（最新的在前）
+        for (index, commit) in unpushed.prefix(5).enumerated() {
+            let expectedNumber = commitCount - index
+            XCTAssertTrue(commit.message.contains("\(expectedNumber)"),
+                          "Commit at index \(index) should match expected number")
+        }
+    }
+
+    // MARK: - Helper Methods
+
+    /// 设置上游分支（使用 libgit2 C API）
+    /// - Parameters:
+    ///   - branchName: 本地分支名称
+    ///   - upstreamName: 上游分支名称（如 "origin/main"）
+    ///   - path: 仓库路径
+    private func setupUpstreamBranch(branchName: String, upstreamName: String, at path: String) throws {
+        // 打开仓库
+        let repo = try LibGit2.openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        // 获取 HEAD 提交（这是"远程"的位置）
+        var headOID = git_oid()
+        let headResult = git_reference_name_to_id(&headOID, repo, "HEAD")
+        guard headResult == 0 else {
+            throw LibGit2Error.cannotGetHEAD
+        }
+
+        // 创建远程跟踪分支（在 refs/remotes/origin/ 下）
+        // 这是一个远程分支引用，不会随本地提交而移动
+        let remoteBranchRefName = "refs/remotes/\(upstreamName)"
+        var upstreamRef: OpaquePointer? = nil
+
+        let createResult = git_reference_create(
+            &upstreamRef,
+            repo,
+            remoteBranchRefName,
+            &headOID,
+            0,  // force=false
+            nil  // log_message
+        )
+
+        guard createResult == 0 else {
+            throw LibGit2Error.remoteNotFound(upstreamName)
+        }
+        defer { git_reference_free(upstreamRef) }
+
+        // 使用 LibGit2Swift 的配置 API 来设置上游分支
+        // branch.<branchName>.remote = origin
+        // branch.<branchName>.merge = refs/heads/main
+        let components = upstreamName.components(separatedBy: "/")
+        let remoteName = components.first ?? "origin"
+        let remoteBranch = components.last ?? branchName
+
+        // 设置 remote 配置
+        try LibGit2.setConfig(
+            key: "branch.\(branchName).remote",
+            value: remoteName,
+            at: path,
+            verbose: false
+        )
+
+        // 设置 merge 配置
+        try LibGit2.setConfig(
+            key: "branch.\(branchName).merge",
+            value: "refs/heads/\(remoteBranch)",
+            at: path,
+            verbose: false
+        )
     }
 }

@@ -5,6 +5,276 @@ import OSLog
 
 /// LibGit2 远程仓库操作扩展
 extension LibGit2 {
+    /// 获取未推送的提交（本地领先远程的提交）
+    /// - Parameter path: 仓库路径
+    /// - Returns: 未推送的提交列表
+    public static func getUnPushedCommits(at path: String) throws -> [GitCommit] {
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        // 获取当前分支的 HEAD
+        var headOID = git_oid()
+        let headResult = git_reference_name_to_id(&headOID, repo, "HEAD")
+
+        guard headResult == 0 else {
+            // 无法获取 HEAD，返回空数组
+            os_log(.debug, "getUnPushedCommits: Cannot get HEAD")
+            return []
+        }
+
+        // 获取当前分支引用
+        var headRef: OpaquePointer? = nil
+        let lookupResult = git_reference_lookup(&headRef, repo, "HEAD")
+
+        guard lookupResult == 0, let ref = headRef else {
+            os_log(.debug, "getUnPushedCommits: Cannot lookup HEAD reference")
+            return []
+        }
+        defer { git_reference_free(headRef) }
+
+        // 解析 HEAD 到实际分支引用
+        var targetRef: OpaquePointer? = nil
+        let resolveResult = git_reference_resolve(&targetRef, ref)
+
+        guard resolveResult == 0, let branchRef = targetRef else {
+            os_log(.debug, "getUnPushedCommits: Cannot resolve HEAD reference")
+            return []
+        }
+        defer { git_reference_free(targetRef) }
+
+        // 获取上游分支
+        var upstreamRef: OpaquePointer? = nil
+        let branchResult = git_branch_upstream(&upstreamRef, branchRef)
+
+        guard branchResult == 0, let upstream = upstreamRef else {
+            // 没有上游分支，返回空数组
+            os_log(.debug, "getUnPushedCommits: No upstream branch configured")
+            return []
+        }
+        defer { git_reference_free(upstreamRef) }
+
+        // 从上游分支引用获取分支名称
+        // git_branch_upstream 返回的是 merge target，我们需要构建实际的远程跟踪分支引用
+        let upstreamName = git_reference_shorthand(upstream)
+        guard let namePtr = upstreamName else {
+            os_log(.debug, "getUnPushedCommits: Cannot get upstream branch name")
+            return []
+        }
+        let upstreamBranchName = String(cString: namePtr)
+
+        #if DEBUG
+        print("🔍 getUnPushedCommits: Configured upstream: \(upstreamBranchName)")
+        #endif
+
+        // 构建远程跟踪分支的全名（refs/remotes/origin/main）
+        // upstreamBranchName 格式为 "origin/main"，我们需要转换为 "refs/remotes/origin/main"
+        let remoteTrackingBranchName = "refs/remotes/\(upstreamBranchName)"
+
+        #if DEBUG
+        print("🔍 getUnPushedCommits: Looking for remote tracking branch: \(remoteTrackingBranchName)")
+        #endif
+
+        // 获取远程跟踪分支的 HEAD OID
+        var upstreamOID = git_oid()
+        let upstreamResult = git_reference_name_to_id(
+            &upstreamOID,
+            repo,
+            remoteTrackingBranchName
+        )
+
+        guard upstreamResult == 0 else {
+            // 无法获取上游 HEAD，返回空数组
+            os_log(.debug, "getUnPushedCommits: Cannot get upstream HEAD OID for \(remoteTrackingBranchName)")
+            #if DEBUG
+            print("❌ getUnPushedCommits: Cannot get upstream HEAD OID for \(remoteTrackingBranchName)")
+            #endif
+            return []
+        }
+
+        #if DEBUG
+        let upstreamOIDStr = oidToString(upstreamOID)
+        let headOIDStr = oidToString(headOID)
+        print("🔍 getUnPushedCommits: HEAD OID: \(headOIDStr)")
+        print("🔍 getUnPushedCommits: Remote tracking OID: \(upstreamOIDStr)")
+        #endif
+
+        // 比较本地和远程，获取领先/落后数量
+        var ahead: Int = 0
+        var behind: Int = 0
+        let graphResult = git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &upstreamOID)
+
+        guard graphResult == 0 else {
+            os_log(.debug, "getUnPushedCommits: Cannot compare graphs")
+            return []
+        }
+
+        #if DEBUG
+        print("🔍 getUnPushedCommits: ahead=\(ahead), behind=\(behind)")
+        #endif
+
+        os_log(.debug, "getUnPushedCommits: ahead=\(ahead), behind=\(behind)")
+
+        // 如果没有领先的提交，返回空数组
+        guard ahead > 0 else {
+            return []
+        }
+
+        // 获取未推送的提交列表
+        var revwalk: OpaquePointer? = nil
+        defer { if revwalk != nil { git_revwalk_free(revwalk) } }
+
+        let walkResult = git_revwalk_new(&revwalk, repo)
+        guard walkResult == 0, let walker = revwalk else {
+            throw LibGit2Error.cannotCreateRevwalk
+        }
+
+        // 按拓扑顺序排序
+        git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue)
+
+        // 推送本地 HEAD
+        git_revwalk_push(walker, &headOID)
+
+        // 隐藏上游提交及其之前的提交
+        git_revwalk_hide(walker, &upstreamOID)
+
+        var commits: [GitCommit] = []
+        var oid = git_oid()
+        var count = 0
+
+        // 遍历提交
+        while git_revwalk_next(&oid, walker) == 0 && count < ahead {
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
+
+            let lookupResult = git_commit_lookup(&commit, repo, &oid)
+
+            if lookupResult == 0, let commitPtr = commit {
+                if let gitCommit = parseCommitFromPointer(commitPtr, repo: repo) {
+                    commits.append(gitCommit)
+                    count += 1
+                }
+            }
+        }
+
+        return commits
+    }
+
+    /// 解析 commit 指针为 GitCommit 结构体（内部方法）
+    private static func parseCommitFromPointer(_ commit: OpaquePointer, repo: OpaquePointer) -> GitCommit? {
+        // 获取提交 ID
+        let oid = git_commit_id(commit)
+        guard let oidPtr = oid else { return nil }
+        let hash = oidToString(oidPtr.pointee)
+
+        // 获取作者信息
+        let authorPtr = git_commit_author(commit)
+        guard let author = authorPtr else { return nil }
+
+        let authorName = String(cString: author.pointee.name)
+        let authorEmail = String(cString: author.pointee.email)
+
+        // 获取提交时间
+        let time = author.pointee.when.time
+        let date = Date(timeIntervalSince1970: TimeInterval(time))
+
+        // 获取提交信息
+        let messagePtr = git_commit_message(commit)
+        let message = messagePtr != nil ? String(cString: messagePtr!) : ""
+        let bodyPtr = git_commit_body(commit)
+        let body = bodyPtr != nil ? String(cString: bodyPtr!) : ""
+
+        // 获取引用和标签（简化版本，只返回空数组）
+        let refs: [String] = []
+        let tags: [String] = []
+
+        return GitCommit(
+            id: hash,
+            hash: hash,
+            author: authorName,
+            email: authorEmail,
+            date: date,
+            message: message,
+            body: body,
+            refs: refs,
+            tags: tags
+        )
+    }
+
+    /// 获取未拉取的提交数量（远程领先本地的提交数量）
+    /// - Parameter path: 仓库路径
+    /// - Returns: 未拉取的提交数量
+    public static func getUnPulledCount(at path: String) throws -> Int {
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        // 获取当前分支的 HEAD
+        var headOID = git_oid()
+        let headResult = git_reference_name_to_id(&headOID, repo, "HEAD")
+
+        guard headResult == 0 else {
+            return 0
+        }
+
+        // 获取当前分支引用
+        var headRef: OpaquePointer? = nil
+        let lookupResult = git_reference_lookup(&headRef, repo, "HEAD")
+
+        guard lookupResult == 0, let ref = headRef else {
+            return 0
+        }
+        defer { git_reference_free(headRef) }
+
+        // 解析 HEAD 到实际分支引用
+        var targetRef: OpaquePointer? = nil
+        let resolveResult = git_reference_resolve(&targetRef, ref)
+
+        guard resolveResult == 0, let branchRef = targetRef else {
+            return 0
+        }
+        defer { git_reference_free(targetRef) }
+
+        // 获取上游分支
+        var upstreamRef: OpaquePointer? = nil
+        let branchResult = git_branch_upstream(&upstreamRef, branchRef)
+
+        guard branchResult == 0, let upstream = upstreamRef else {
+            // 没有上游分支
+            return 0
+        }
+        defer { git_reference_free(upstreamRef) }
+
+        // 从上游分支引用获取分支名称并构建远程跟踪分支的全名
+        let upstreamName = git_reference_shorthand(upstream)
+        guard let namePtr = upstreamName else {
+            return 0
+        }
+        let upstreamBranchName = String(cString: namePtr)
+        let remoteTrackingBranchName = "refs/remotes/\(upstreamBranchName)"
+
+        // 获取远程跟踪分支的 HEAD OID
+        var upstreamOID = git_oid()
+        let upstreamResult = git_reference_name_to_id(
+            &upstreamOID,
+            repo,
+            remoteTrackingBranchName
+        )
+
+        guard upstreamResult == 0 else {
+            return 0
+        }
+
+        // 比较本地和远程，获取领先/落后数量
+        var ahead: Int = 0
+        var behind: Int = 0
+        let graphResult = git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &upstreamOID)
+
+        guard graphResult == 0 else {
+            return 0
+        }
+
+        return behind
+    }
+
     /// 获取远程仓库列表
     /// - Parameter path: 仓库路径
     /// - Returns: 远程仓库列表
