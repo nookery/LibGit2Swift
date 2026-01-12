@@ -62,11 +62,11 @@ final class TestGitRepository {
         try LibGit2.addFiles([fileName], at: repositoryPath)
 
         // 配置用户信息
-        try LibGit2.setConfig(key: "user.name", value: authorName, at: repositoryPath)
-        try LibGit2.setConfig(key: "user.email", value: authorEmail, at: repositoryPath)
+        try LibGit2.setConfig(key: "user.name", value: authorName, at: repositoryPath, verbose: false)
+        try LibGit2.setConfig(key: "user.email", value: authorEmail, at: repositoryPath, verbose: false)
 
         // 创建提交
-        _ = try LibGit2.createCommit(message: message, at: repositoryPath)
+        _ = try LibGit2.createCommit(message: message, at: repositoryPath, verbose: false)
 
         // 如果这是第一次调用，确保创建main分支
         // 注意：这可能不是最优的解决方案，但可以避免重复创建分支的问题
@@ -85,7 +85,7 @@ final class TestGitRepository {
     ///   - tagName: 标签名
     ///   - message: 标签消息
     func createTag(tagName: String, message: String? = nil) throws {
-        try LibGit2.createTag(named: tagName, message: message, in: repositoryPath)
+        try LibGit2.createTag(named: tagName, message: message, in: repositoryPath, verbose: false)
     }
 
     /// 添加远程仓库

@@ -138,7 +138,7 @@ final class CheckoutTests: LibGit2SwiftTestCase {
 
         // 提交文件
         try LibGit2.addFiles([fileName], at: testRepo.repositoryPath)
-        try LibGit2.createCommit(message: "Add file", at: testRepo.repositoryPath)
+        try LibGit2.createCommit(message: "Add file", at: testRepo.repositoryPath, verbose: false)
 
         // 修改文件
         try "Modified content".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -329,7 +329,7 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         try "Content on feature branch".write(to: fileURL, atomically: true, encoding: .utf8)
 
         try LibGit2.addFiles(["file1.txt"], at: testRepo.repositoryPath)
-        try LibGit2.createCommit(message: "Modify on feature", at: testRepo.repositoryPath)
+        try LibGit2.createCommit(message: "Modify on feature", at: testRepo.repositoryPath, verbose: false)
 
         // 切换回主分支
         try LibGit2.checkout(branch: initialBranch, at: testRepo.repositoryPath)

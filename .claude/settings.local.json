@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(swift build:*)"
+      "Bash(swift build:*)",
+      "mcp__zread__get_repo_structure",
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__web-reader__webReader",
+      "Bash(swift test:*)",
+      "Bash(swiftc:*)",
+      "Bash(git checkout:*)",
+      "Bash(cat:*)",
+      "Bash(git add:*)"
     ]
   }
 }

@@ -10,10 +10,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置配置
         let key = "user.name"
         let value = "Test User"
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
         // 验证配置已设置
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
         XCTAssertEqual(retrievedValue, value, "Retrieved value should match the set value")
     }
 
@@ -27,12 +27,12 @@ final class ConfigTests: LibGit2SwiftTestCase {
         ]
 
         for (key, value) in configs {
-            try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+            try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
         }
 
         // 验证所有配置
         for (key, value) in configs {
-            let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+            let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
             XCTAssertEqual(retrievedValue, value, "Config '\(key)' should match")
         }
     }
@@ -43,10 +43,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置配置
         let key = "test.key"
         let value = "test value"
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
         // 获取配置
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Retrieved value should match")
     }
@@ -56,7 +56,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         let nonExistentKey = "nonexistent.key"
 
         XCTAssertThrowsError(
-            try LibGit2.getConfig(key: nonExistentKey, at: testRepo.repositoryPath)
+            try LibGit2.getConfig(key: nonExistentKey, at: testRepo.repositoryPath, verbose: false)
         ) { error in
             XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for non-existent config")
         }
@@ -67,10 +67,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
     func testGetUserName() throws {
         // 设置用户名
         let expectedName = "John Doe"
-        try LibGit2.setConfig(key: "user.name", value: expectedName, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: "user.name", value: expectedName, at: testRepo.repositoryPath, verbose: false)
 
         // 获取用户名
-        let userName = try LibGit2.getUserName(at: testRepo.repositoryPath)
+        let userName = try LibGit2.getUserName(at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(userName, expectedName, "User name should match")
     }
@@ -78,7 +78,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
     func testGetUserEmail() throws {
         // 设置用户邮箱
         let expectedEmail = "john.doe@example.com"
-        try LibGit2.setConfig(key: "user.email", value: expectedEmail, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: "user.email", value: expectedEmail, at: testRepo.repositoryPath, verbose: false)
 
         // 获取用户邮箱
         let userEmail = try LibGit2.getUserEmail(at: testRepo.repositoryPath)
@@ -92,7 +92,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         try LibGit2.setUserName(name: expectedName, at: testRepo.repositoryPath)
 
         // 验证
-        let retrievedName = try LibGit2.getUserName(at: testRepo.repositoryPath)
+        let retrievedName = try LibGit2.getUserName(at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedName, expectedName, "User name should be set correctly")
     }
@@ -114,10 +114,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置本地配置
         let key = "test.local"
         let value = "local value"
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
         // 获取本地配置
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Local config should match")
     }
@@ -133,7 +133,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         try LibGit2.setUserName(name: localName, at: testRepo.repositoryPath)
 
         // 获取用户名应该返回本地配置
-        let userName = try LibGit2.getUserName(at: testRepo.repositoryPath)
+        let userName = try LibGit2.getUserName(at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(userName, localName, "Should use local user name")
     }
@@ -143,9 +143,9 @@ final class ConfigTests: LibGit2SwiftTestCase {
     func testSetCoreEditor() throws {
         // 设置编辑器
         let editor = "code --wait"
-        try LibGit2.setConfig(key: "core.editor", value: editor, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: "core.editor", value: editor, at: testRepo.repositoryPath, verbose: false)
 
-        let retrievedEditor = try LibGit2.getConfig(key: "core.editor", at: testRepo.repositoryPath)
+        let retrievedEditor = try LibGit2.getConfig(key: "core.editor", at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedEditor, editor, "Core editor should be set")
     }
@@ -154,10 +154,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置合并冲突样式
         let conflictStyle = "zdiff3"
         try LibGit2.setConfig(key: "merge.conflictstyle", value: conflictStyle,
-                             at: testRepo.repositoryPath)
+                             at: testRepo.repositoryPath,
+                             verbose: false)
 
-        let retrievedStyle = try LibGit2.getConfig(key: "merge.conflictstyle",
-                                                     at: testRepo.repositoryPath)
+        let retrievedStyle = try LibGit2.getConfig(key: "merge.conflictstyle", at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedStyle, conflictStyle, "Merge conflict style should be set")
     }
@@ -166,10 +166,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置默认推送分支
         let pushDefault = "current"
         try LibGit2.setConfig(key: "push.default", value: pushDefault,
-                             at: testRepo.repositoryPath)
+                             at: testRepo.repositoryPath,
+                             verbose: false)
 
-        let retrievedDefault = try LibGit2.getConfig(key: "push.default",
-                                                      at: testRepo.repositoryPath)
+        let retrievedDefault = try LibGit2.getConfig(key: "push.default", at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedDefault, pushDefault, "Push default should be set")
     }
@@ -181,9 +181,9 @@ final class ConfigTests: LibGit2SwiftTestCase {
         let key = "test.special"
         let value = "value with spaces & symbols!@#$%"
 
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Config with special characters should be preserved")
     }
@@ -193,9 +193,9 @@ final class ConfigTests: LibGit2SwiftTestCase {
         let key = "section.subsection.property"
         let value = "value"
 
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Multi-level config key should work")
     }
@@ -206,14 +206,14 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置初始配置
         let key = "test.update"
         let initialValue = "initial value"
-        try LibGit2.setConfig(key: key, value: initialValue, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: initialValue, at: testRepo.repositoryPath, verbose: false)
 
         // 更新配置
         let updatedValue = "updated value"
-        try LibGit2.setConfig(key: key, value: updatedValue, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: updatedValue, at: testRepo.repositoryPath, verbose: false)
 
         // 验证配置已更新
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, updatedValue, "Config should be updated")
         XCTAssertNotEqual(retrievedValue, initialValue, "Config should not be the initial value")
@@ -224,7 +224,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
     func testSetConfigWithEmptyKey() throws {
         // 尝试设置空键名的配置应该失败
         XCTAssertThrowsError(
-            try LibGit2.setConfig(key: "", value: "value", at: testRepo.repositoryPath)
+            try LibGit2.setConfig(key: "", value: "value", at: testRepo.repositoryPath, verbose: false)
         ) { error in
             XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for empty key")
         }
@@ -237,12 +237,12 @@ final class ConfigTests: LibGit2SwiftTestCase {
 
         // 设置空值（这可能会删除配置）
         XCTAssertNoThrow(
-            try LibGit2.setConfig(key: key, value: "", at: testRepo.repositoryPath)
+            try LibGit2.setConfig(key: key, value: "", at: testRepo.repositoryPath, verbose: false)
         )
 
         // 验证配置已删除
         XCTAssertThrowsError(
-            try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+            try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
         )
     }
 
@@ -252,7 +252,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         // 设置配置
         let key = "test.persistence"
         let value = "persistent value"
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
         // 创建一个提交
         try testRepo.createFileAndCommit(
@@ -262,7 +262,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         )
 
         // 配置应该仍然存在
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Config should persist across operations")
     }
@@ -278,7 +278,7 @@ final class ConfigTests: LibGit2SwiftTestCase {
         try LibGit2.setUserEmail(email: email, at: testRepo.repositoryPath)
 
         // 验证配置
-        let retrievedName = try LibGit2.getUserName(at: testRepo.repositoryPath)
+        let retrievedName = try LibGit2.getUserName(at: testRepo.repositoryPath, verbose: false)
         let retrievedEmail = try LibGit2.getUserEmail(at: testRepo.repositoryPath)
 
         XCTAssertEqual(retrievedName, name, "User name should be correct")
@@ -311,12 +311,12 @@ final class ConfigTests: LibGit2SwiftTestCase {
         ]
 
         for (key, value) in configs {
-            try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+            try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
         }
 
         // 验证所有配置
         for (key, value) in configs {
-            let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+            let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
             XCTAssertEqual(retrievedValue, value, "Config '\(key)' should match")
         }
     }
@@ -334,10 +334,10 @@ final class ConfigTests: LibGit2SwiftTestCase {
         let key = "branch.\(branch).description"
         let value = "Main development branch"
 
-        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: key, value: value, at: testRepo.repositoryPath, verbose: false)
 
         // 验证配置
-        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath)
+        let retrievedValue = try LibGit2.getConfig(key: key, at: testRepo.repositoryPath, verbose: false)
 
         XCTAssertEqual(retrievedValue, value, "Branch-specific config should work")
     }

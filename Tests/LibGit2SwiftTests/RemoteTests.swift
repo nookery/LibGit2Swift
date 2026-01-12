@@ -353,6 +353,205 @@ final class RemoteTests: LibGit2SwiftTestCase {
         }
     }
 
+    // MARK: - SSH Remote Tests
+
+    func testAddSSHRemote() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加 SSH 格式的远程仓库（SCP-like）
+        let sshURL = "git@github.com:test/repo.git"
+        try LibGit2.addRemote(name: "origin", url: sshURL, at: testRepo.repositoryPath)
+
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        let remote = remotes.first { $0.name == "origin" }
+
+        XCTAssertNotNil(remote, "SSH remote should be added")
+        XCTAssertEqual(remote?.url, sshURL, "SSH URL should be preserved")
+    }
+
+    func testAddSSHRemoteWithProtocol() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加带协议前缀的 SSH URL
+        let sshURL = "ssh://git@github.com/test/repo.git"
+        try LibGit2.addRemote(name: "origin", url: sshURL, at: testRepo.repositoryPath)
+
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        let remote = remotes.first { $0.name == "origin" }
+
+        XCTAssertNotNil(remote, "SSH remote with protocol should be added")
+        XCTAssertEqual(remote?.url, sshURL, "SSH URL with protocol should be preserved")
+    }
+
+    func testMixedRemoteProtocols() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加不同协议的远程仓库
+        let remotes = [
+            ("origin", "https://github.com/test/repo.git", "HTTPS"),
+            ("upstream", "git@github.com:original/repo.git", "SSH (SCP-like)"),
+            ("mirror", "ssh://git@gitlab.com/test/repo.git", "SSH (with protocol)"),
+            ("backup", "git://github.com/test/repo.git", "Git protocol")
+        ]
+
+        for (name, url, _) in remotes {
+            try LibGit2.addRemote(name: name, url: url, at: testRepo.repositoryPath)
+        }
+
+        let remoteList = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        XCTAssertEqual(remoteList.count, 4, "Should have all four remotes")
+
+        // 验证每个远程的 URL
+        for (name, url, protocolType) in remotes {
+            let retrievedURL = try LibGit2.getRemoteURL(name: name, at: testRepo.repositoryPath)
+            XCTAssertEqual(retrievedURL, url, "\(protocolType) URL for '\(name)' should match")
+        }
+    }
+
+    func testSSHRemoteURLPersistence() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加 SSH 远程
+        let originalSSHURL = "git@github.com:test/repo.git"
+        try LibGit2.addRemote(name: "origin", url: originalSSHURL, at: testRepo.repositoryPath)
+
+        // 更新为不同的 SSH URL
+        let newSSHURL = "git@gitlab.com:test/repo.git"
+        try LibGit2.setRemoteURL(name: "origin", url: newSSHURL, at: testRepo.repositoryPath)
+
+        // 验证 URL 已更新
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        let remote = remotes.first { $0.name == "origin" }
+
+        XCTAssertNotNil(remote, "Remote should exist")
+        XCTAssertEqual(remote?.url, newSSHURL, "Remote URL should be updated to new SSH URL")
+        XCTAssertNotEqual(remote?.url, originalSSHURL, "Remote URL should not be the old SSH URL")
+    }
+
+    func testSSHRemoteInRemoteList() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加多个 SSH 远程
+        let sshRemotes = [
+            ("origin", "git@github.com:test/repo.git"),
+            ("gitlab", "git@gitlab.com:test/repo.git"),
+            ("bitbucket", "git@bitbucket.org:test/repo.git")
+        ]
+
+        for (name, url) in sshRemotes {
+            try LibGit2.addRemote(name: name, url: url, at: testRepo.repositoryPath)
+        }
+
+        // 获取远程列表并验证
+        let remoteList = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        XCTAssertEqual(remoteList.count, 3, "Should have all three SSH remotes")
+
+        // 验证每个 SSH 远程的属性
+        for (name, url) in sshRemotes {
+            let remote = remoteList.first { $0.name == name }
+            XCTAssertNotNil(remote, "SSH remote '\(name)' should exist")
+            XCTAssertEqual(remote?.url, url, "SSH remote '\(name)' URL should match")
+            XCTAssertEqual(remote?.fetchURL, url, "SSH remote '\(name)' fetch URL should match")
+            XCTAssertEqual(remote?.pushURL, url, "SSH remote '\(name)' push URL should match")
+
+            // 验证 isDefault 标志
+            if name == "origin" {
+                XCTAssertTrue(remote?.isDefault ?? false, "origin remote should be marked as default")
+            }
+        }
+    }
+
+    func testDeleteSSHRemote() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加 SSH 远程
+        let sshURL = "git@github.com:test/repo.git"
+        try LibGit2.addRemote(name: "origin", url: sshURL, at: testRepo.repositoryPath)
+
+        // 删除远程
+        try LibGit2.removeRemote(name: "origin", at: testRepo.repositoryPath)
+
+        // 验证已删除
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        let remoteNames = remotes.map { $0.name }
+
+        XCTAssertFalse(remoteNames.contains("origin"), "SSH remote should be deleted")
+    }
+
+    func testRenameSSHRemote() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 添加 SSH 远程
+        let sshURL = "git@github.com:test/repo.git"
+        try LibGit2.addRemote(name: "origin", url: sshURL, at: testRepo.repositoryPath)
+
+        // 重命名
+        try LibGit2.renameRemote(oldName: "origin", to: "upstream", at: testRepo.repositoryPath)
+
+        // 验证重命名
+        let remotes = try LibGit2.getRemoteList(at: testRepo.repositoryPath)
+        let remoteNames = remotes.map { $0.name }
+
+        XCTAssertFalse(remoteNames.contains("origin"), "Old name should not exist")
+        XCTAssertTrue(remoteNames.contains("upstream"), "New name should exist")
+
+        // 验证 URL 保持不变
+        let renamedRemote = remotes.first { $0.name == "upstream" }
+        XCTAssertEqual(renamedRemote?.url, sshURL, "URL should remain the same after rename")
+    }
+
+    func testSSHRemoteURLExtraction() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 测试不同格式的 SSH URL
+        let sshURLs = [
+            "git@github.com:test/repo.git",
+            "ssh://git@github.com/test/repo.git",
+            "git@gitlab.com:test/repo.git"
+        ]
+
+        for (index, sshURL) in sshURLs.enumerated() {
+            let remoteName = "remote\(index)"
+            try LibGit2.addRemote(name: remoteName, url: sshURL, at: testRepo.repositoryPath)
+
+            // 获取并验证 URL
+            let retrievedURL = try LibGit2.getRemoteURL(name: remoteName, at: testRepo.repositoryPath)
+            XCTAssertEqual(retrievedURL, sshURL, "SSH URL '\(sshURL)' should be retrieved correctly")
+        }
+    }
+
     // MARK: - Complex Scenarios
 
     func testMultipleRemotesWithDifferentNames() throws {

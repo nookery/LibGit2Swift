@@ -99,7 +99,7 @@ final class DiffTests: LibGit2SwiftTestCase {
         try FileManager.default.removeItem(at: fileURL)
 
         try LibGit2.addFiles(["file1.txt"], at: testRepo.repositoryPath)
-        _ = try LibGit2.createCommit(message: "Delete file1", at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Delete file1", at: testRepo.repositoryPath, verbose: false)
 
         // 获取提交列表
         let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
@@ -330,7 +330,7 @@ final class DiffTests: LibGit2SwiftTestCase {
         let fileURL = testRepo.tempDirectory.appendingPathComponent("toremove.txt")
         try FileManager.default.removeItem(at: fileURL)
         try LibGit2.addFiles(["toremove.txt"], at: testRepo.repositoryPath)
-        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath, verbose: false)
 
         // 获取提交列表
         let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
@@ -509,7 +509,7 @@ final class DiffTests: LibGit2SwiftTestCase {
         let fileURL = testRepo.tempDirectory.appendingPathComponent("delete.txt")
         try FileManager.default.removeItem(at: fileURL)
         try LibGit2.addFiles(["delete.txt"], at: testRepo.repositoryPath)
-        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Delete file", at: testRepo.repositoryPath, verbose: false)
 
         // 获取提交列表
         let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
