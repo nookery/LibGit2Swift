@@ -1,52 +1,83 @@
 import Foundation
+import MagicLog
 import Clibgit2
 import OSLog
 
 // MARK: - Network Operations
 
-/// 控制网络操作的日志输出
-private var networkVerbose: Bool = true
+/// 网络操作的 C 回调函数封装
+private struct NetworkCallbacks: SuperLog {
+    public static let emoji = "🌐"
 
-// MARK: - Authentication Error Detection
+    /// 控制网络操作的日志输出
+    static var verbose: Bool = true
 
-/// 检查错误是否是认证错误
-/// - Parameters:
-///   - errorCode: libgit2 错误代码
-///   - errorMessage: 错误消息
-/// - Returns: 如果是认证错误返回 true
-private func isAuthenticationError(_ errorCode: Int32, errorMessage: String) -> Bool {
-    // 检查错误代码是否是 GIT_EUSER (-3) 或其他认证相关错误
-    if errorCode == Int32(GIT_EUSER.rawValue) {
-        return true
+    /// Push 进度回调函数
+    static let pushTransferProgress: git_push_transfer_progress = { (current: UInt32, total: UInt32, bytes: Int, payload: UnsafeMutableRawPointer?) -> Int32 in
+        let verbose = payload?.assumingMemoryBound(to: Bool.self).pointee ?? true
+        let percent = total > 0 ? Float(current) / Float(total) * 100 : 0
+        if verbose {
+            os_log("\(Self.t) Push progress: \(String(format: "%.1f", percent))%")
+        }
+        return 0
     }
 
-    // 检查错误消息中是否包含认证相关的关键词
-    let lowercasedMessage = errorMessage.lowercased()
-    let authKeywords = [
-        "authentication",
-        "auth",
-        "credential",
-        "permission",
-        "denied",
-        "unauthorized",
-        "401",
-        "403",
-        "forbidden"
-    ]
-
-    return authKeywords.contains { lowercasedMessage.contains($0) }
+    /// Fetch/Clone 进度回调函数
+    static let transferProgress: @convention(c) (UnsafePointer<git_indexer_progress>?, UnsafeMutableRawPointer?) -> Int32 = { (progress, payload) in
+        guard let progress = progress else { return 0 }
+        let received = progress.pointee.received_objects
+        let total = progress.pointee.total_objects
+        let percent = total > 0 ? Float(received) / Float(total) * 100 : 0
+        let verbose = payload?.assumingMemoryBound(to: Bool.self).pointee ?? true
+        if verbose {
+            os_log("\(Self.t) Transfer progress: \(String(format: "%.1f", percent))%")
+        }
+        return 0
+    }
 }
 
 /// LibGit2 网络操作扩展（push, pull, clone）
 extension LibGit2 {
+    // MARK: - Authentication Error Detection
+
+    /// 检查错误是否是认证错误
+    /// - Parameters:
+    ///   - errorCode: libgit2 错误代码
+    ///   - errorMessage: 错误消息
+    /// - Returns: 如果是认证错误返回 true
+    private static func isAuthenticationError(_ errorCode: Int32, errorMessage: String) -> Bool {
+        // 检查错误代码是否是 GIT_EUSER (-3) 或其他认证相关错误
+        if errorCode == Int32(GIT_EUSER.rawValue) {
+            return true
+        }
+
+        // 检查错误消息中是否包含认证相关的关键词
+        let lowercasedMessage = errorMessage.lowercased()
+        let authKeywords = [
+            "authentication",
+            "auth",
+            "credential",
+            "permission",
+            "denied",
+            "unauthorized",
+            "401",
+            "403",
+            "forbidden"
+        ]
+
+        return authKeywords.contains { lowercasedMessage.contains($0) }
+    }
+
+    // MARK: - Public Methods
+
     /// 推送到远程仓库
     /// - Parameters:
     ///   - path: 仓库路径
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
     public static func push(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
-        networkVerbose = verbose
-        if networkVerbose { os_log("🐚 LibGit2: Pushing to remote: %{public}@", remote) }
+        NetworkCallbacks.verbose = verbose
+        if NetworkCallbacks.verbose { os_log("\(t)Pushing to remote: \(remote)") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -87,16 +118,17 @@ extension LibGit2 {
             git_push_init_options(&pushOpts, UInt32(GIT_PUSH_OPTIONS_VERSION))
 
             // 设置进度回调
-            pushOpts.callbacks.push_transfer_progress = { (current: UInt32, total: UInt32, bytes: Int, payload: UnsafeMutableRawPointer?) -> Int32 in
-                let percent = total > 0 ? Float(current) / Float(total) * 100 : 0
-                if networkVerbose { os_log("🐚 LibGit2: Push progress: %.1f%%", percent) }
-                return 0
-            }
+            pushOpts.callbacks.push_transfer_progress = NetworkCallbacks.pushTransferProgress
+            let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+            verbosePayloadPtr.pointee = verbose
 
             // 设置凭据回调
             pushOpts.callbacks.credentials = gitCredentialCallback
+            pushOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
 
-            return git_remote_push(remotePtr, &refspecs, &pushOpts)
+            let result = git_remote_push(remotePtr, &refspecs, &pushOpts)
+            verbosePayloadPtr.deallocate()
+            return result
         }
 
         if result_strarray != 0 {
@@ -115,7 +147,7 @@ extension LibGit2 {
                 errorMessage = "Push failed - please check your credentials and network connection"
             }
 
-            if networkVerbose { os_log("❌ LibGit2: Push failed with code %d: %{public}@", result_strarray, errorMessage) }
+            if NetworkCallbacks.verbose { os_log("\(t)Push failed with code \(result_strarray): \(errorMessage)") }
 
             // 检查是否是认证错误
             if isAuthenticationError(result_strarray, errorMessage: errorMessage) {
@@ -125,7 +157,7 @@ extension LibGit2 {
             throw LibGit2Error.pushFailed(errorMessage)
         }
 
-        if networkVerbose { os_log("🐚 LibGit2: Push completed successfully") }
+        if NetworkCallbacks.verbose { os_log("\(t)Push completed successfully") }
     }
 
     /// 从远程仓库拉取
@@ -134,8 +166,8 @@ extension LibGit2 {
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
     public static func pull(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
-        networkVerbose = verbose
-        if networkVerbose { os_log("🐚 LibGit2: Pulling from remote: %{public}@", remote) }
+        NetworkCallbacks.verbose = verbose
+        if NetworkCallbacks.verbose { os_log("\(t)Pulling from remote: \(remote)") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -167,18 +199,15 @@ extension LibGit2 {
         var fetchOpts = git_fetch_options()
         git_fetch_init_options(&fetchOpts, UInt32(GIT_FETCH_OPTIONS_VERSION))
 
-        // 设置进度回调
-        fetchOpts.callbacks.transfer_progress = { (progress: UnsafePointer<git_indexer_progress>?, payload: UnsafeMutableRawPointer?) -> Int32 in
-            guard let progress = progress else { return 0 }
-            let received = progress.pointee.received_objects
-            let total = progress.pointee.total_objects
-            let percent = total > 0 ? Float(received) / Float(total) * 100 : 0
-            if networkVerbose { os_log("🐚 LibGit2: Fetch progress: %.1f%%", percent) }
-            return 0
-        }
-
         // 设置凭据回调
         fetchOpts.callbacks.credentials = gitCredentialCallback
+
+        // 设置进度回调
+        fetchOpts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
+        let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        verbosePayloadPtr.pointee = verbose
+        defer { verbosePayloadPtr.deallocate() }
+        fetchOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
 
         // 执行 fetch
         let refspecPtr = strdup(refspec)
@@ -202,7 +231,7 @@ extension LibGit2 {
                 }
             }
 
-            if networkVerbose { os_log("❌ LibGit2: Fetch failed with code %d: %{public}@", fetchResult, errorMessage) }
+            if NetworkCallbacks.verbose { os_log("\(t)Fetch failed with code \(fetchResult): \(errorMessage)") }
 
             // 检查是否是认证错误
             if isAuthenticationError(fetchResult, errorMessage: errorMessage) {
@@ -246,7 +275,7 @@ extension LibGit2 {
 
         // 执行合并
         if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
-            if networkVerbose { os_log("🐚 LibGit2: Already up to date") }
+            if NetworkCallbacks.verbose { os_log("\(t)Already up to date") }
             return
         }
 
@@ -279,7 +308,7 @@ extension LibGit2 {
             // 这里简化处理，实际应用中可能需要更复杂的逻辑
         }
 
-        os_log("🐚 LibGit2: Pull completed successfully")
+        os_log("\(t)Pull completed successfully")
     }
 
     /// 克隆远程仓库
@@ -289,7 +318,7 @@ extension LibGit2 {
     ///   - branch: 要克隆的分支（nil 表示默认分支）
     ///   - depth: 浅克隆深度（0 表示完整克隆）
     public static func clone(url: String, to destination: String, branch: String? = nil, depth: Int = 0) throws {
-        os_log("🐚 LibGit2: Cloning repository from: %{public}@", url)
+        os_log("\(t)Cloning repository from: \(url)")
 
         var cloneOpts = git_clone_options()
         git_clone_init_options(&cloneOpts, UInt32(GIT_CLONE_OPTIONS_VERSION))
@@ -304,14 +333,11 @@ extension LibGit2 {
         // For now removing it if it causes errors.
 
         // 设置进度回调
-        cloneOpts.fetch_opts.callbacks.transfer_progress = { (progress: UnsafePointer<git_indexer_progress>?, payload: UnsafeMutableRawPointer?) -> Int32 in
-            guard let progress = progress else { return 0 }
-            let received = progress.pointee.received_objects
-            let total = progress.pointee.total_objects
-            let percent = total > 0 ? Float(received) / Float(total) * 100 : 0
-            os_log("🐚 LibGit2: Clone progress: %.1f%%", percent)
-            return 0
-        }
+        cloneOpts.fetch_opts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
+        let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        verbosePayloadPtr.pointee = true
+        defer { verbosePayloadPtr.deallocate() }
+        cloneOpts.fetch_opts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
 
         var repo: OpaquePointer? = nil
         let result = git_clone(&repo, url, destination, &cloneOpts)
@@ -319,7 +345,7 @@ extension LibGit2 {
         if result != 0 || repo == nil {
             if let error = git_error_last() {
                 let message = String(cString: error.pointee.message)
-                os_log("❌ LibGit2: Clone failed: %{public}@", message)
+                os_log("\(t)Clone failed: \(message)")
             }
             throw LibGit2Error.cloneFailed
         }
