@@ -113,7 +113,7 @@ final class CredentialTests: LibGit2SwiftTestCase {
         try XCTSkipIf(isRunningInCI(), "Keychain tests skipped in CI environment")
 
         // 测试当没有凭据时的回调行为
-        let testURL = "https://github.com/test/no-credential-test.git"
+        let testURL = "https://nonexistent-domain-12345.com/test/no-credential-test.git"
 
         // 确保没有这个凭据
         deleteKeychainCredential(for: testURL)

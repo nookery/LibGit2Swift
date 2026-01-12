@@ -6,14 +6,11 @@ import OSLog
 extension LibGit2 {
     /// 切换分支
     /// - Parameters:
-    ///   - branchName: 分支名称
+    ///   - branch: 分支名称
     ///   - path: 仓库路径
-    /// 切换分支
-    /// - Parameters:
-    ///   - branchName: 分支名称
-    ///   - path: 仓库路径
-    public static func checkout(branch: String, at path: String) throws {
-        os_log("🐚 LibGit2: Checking out branch: %{public}@", branch)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func checkout(branch: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Checking out branch: %{public}@", branch) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -25,7 +22,7 @@ extension LibGit2 {
 
         let lookupResult = git_reference_lookup(&reference, repo, branchRef)
         if lookupResult != 0 {
-            os_log("⚠️ LibGit2: Branch reference %{public}@ does not exist (error: %d)", branchRef, lookupResult)
+            if verbose { os_log("⚠️ LibGit2: Branch reference %{public}@ does not exist (error: %d)", branchRef, lookupResult) }
             throw LibGit2Error.checkoutFailed(branch)
         }
 
@@ -53,15 +50,15 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(branch)
         }
 
-        os_log("🐚 LibGit2: Checked out branch: %{public}@", branch)
+        if verbose { os_log("🐚 LibGit2: Checked out branch: %{public}@", branch) }
     }
 
     /// 创建并切换到新分支
     /// - Parameters:
     ///   - branchName: 新分支名称
     ///   - path: 仓库路径
-    public static func checkoutNewBranch(named branchName: String, at path: String) throws {
-        os_log("🐚 LibGit2: Creating and checking out new branch: %{public}@", branchName)
+    public static func checkoutNewBranch(named branchName: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Creating and checking out new branch: %{public}@", branchName) }
 
         // 首先创建分支
         _ = try createBranch(named: branchName, at: path, checkout: false)
@@ -74,8 +71,8 @@ extension LibGit2 {
     /// - Parameters:
     ///   - filePath: 文件路径
     ///   - path: 仓库路径
-    public static func checkoutFile(_ filePath: String, at path: String) throws {
-        os_log("🐚 LibGit2: Checking out file: %{public}@", filePath)
+    public static func checkoutFile(_ filePath: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Checking out file: %{public}@", filePath) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -137,14 +134,14 @@ extension LibGit2 {
         git_index_add_bypath(index!, filePath)
         git_index_write(index!)
 
-        os_log("🐚 LibGit2: File checked out: %{public}@", filePath)
+        if verbose { os_log("🐚 LibGit2: File checked out: %{public}@", filePath) }
     }
 
     /// 检出多个文件（丢弃文件变更）
     /// - Parameters:
     ///   - filePaths: 文件路径数组
     ///   - path: 仓库路径
-    public static func checkoutFiles(_ filePaths: [String], at path: String) throws {
+    public static func checkoutFiles(_ filePaths: [String], at path: String, verbose: Bool = true) throws {
         for filePath in filePaths {
             try checkoutFile(filePath, at: path)
         }
@@ -152,8 +149,8 @@ extension LibGit2 {
 
     /// 检出所有文件（丢弃所有变更）
     /// - Parameter path: 仓库路径
-    public static func checkoutAllFiles(at path: String) throws {
-        os_log("🐚 LibGit2: Checking out all files")
+    public static func checkoutAllFiles(at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Checking out all files") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -190,15 +187,15 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed("HEAD")
         }
 
-        os_log("🐚 LibGit2: All files checked out")
+        if verbose { os_log("🐚 LibGit2: All files checked out") }
     }
 
     /// 检出指定提交
     /// - Parameters:
     ///   - commitHash: 提交哈希
     ///   - path: 仓库路径
-    public static func checkoutCommit(_ commitHash: String, at path: String) throws {
-        os_log("🐚 LibGit2: Checking out commit: %{public}@", commitHash)
+    public static func checkoutCommit(_ commitHash: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Checking out commit: %{public}@", commitHash) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -304,7 +301,7 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(commitHash)
         }
 
-        os_log("🐚 LibGit2: Checked out commit: %{public}@", commitHash)
+        if verbose { os_log("🐚 LibGit2: Checked out commit: %{public}@", commitHash) }
     }
 
     /// 检出远程分支
@@ -312,7 +309,7 @@ extension LibGit2 {
     ///   - remoteBranch: 远程分支名称（如 "origin/main"）
     ///   - localBranch: 本地分支名称（nil 则使用远程分支名）
     ///   - path: 仓库路径
-    static func checkoutRemoteBranch(_ remoteBranch: String, as localBranch: String?, at path: String) throws {
+    static func checkoutRemoteBranch(_ remoteBranch: String, as localBranch: String?, at path: String, verbose: Bool = true) throws {
         let localName = localBranch ?? remoteBranch.replacingOccurrences(of: "^[^/]+/", with: "", options: .regularExpression)
 
         // 创建本地分支跟踪远程分支

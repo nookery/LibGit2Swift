@@ -2,6 +2,11 @@ import Foundation
 import Clibgit2
 import OSLog
 
+// MARK: - Network Operations
+
+/// 控制网络操作的日志输出
+private var networkVerbose: Bool = true
+
 // MARK: - Authentication Error Detection
 
 /// 检查错误是否是认证错误
@@ -39,8 +44,9 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
-    public static func push(at path: String, remote: String = "origin", branch: String? = nil) throws {
-        os_log("🐚 LibGit2: Pushing to remote: %{public}@", remote)
+    public static func push(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
+        networkVerbose = verbose
+        if networkVerbose { os_log("🐚 LibGit2: Pushing to remote: %{public}@", remote) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -83,7 +89,7 @@ extension LibGit2 {
             // 设置进度回调
             pushOpts.callbacks.push_transfer_progress = { (current: UInt32, total: UInt32, bytes: Int, payload: UnsafeMutableRawPointer?) -> Int32 in
                 let percent = total > 0 ? Float(current) / Float(total) * 100 : 0
-                os_log("🐚 LibGit2: Push progress: %.1f%%", percent)
+                if networkVerbose { os_log("🐚 LibGit2: Push progress: %.1f%%", percent) }
                 return 0
             }
 
@@ -109,7 +115,7 @@ extension LibGit2 {
                 errorMessage = "Push failed - please check your credentials and network connection"
             }
 
-            os_log("❌ LibGit2: Push failed with code %d: %{public}@", result_strarray, errorMessage)
+            if networkVerbose { os_log("❌ LibGit2: Push failed with code %d: %{public}@", result_strarray, errorMessage) }
 
             // 检查是否是认证错误
             if isAuthenticationError(result_strarray, errorMessage: errorMessage) {
@@ -119,7 +125,7 @@ extension LibGit2 {
             throw LibGit2Error.pushFailed(errorMessage)
         }
 
-        os_log("🐚 LibGit2: Push completed successfully")
+        if networkVerbose { os_log("🐚 LibGit2: Push completed successfully") }
     }
 
     /// 从远程仓库拉取
@@ -127,8 +133,9 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
-    public static func pull(at path: String, remote: String = "origin", branch: String? = nil) throws {
-        os_log("🐚 LibGit2: Pulling from remote: %{public}@", remote)
+    public static func pull(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
+        networkVerbose = verbose
+        if networkVerbose { os_log("🐚 LibGit2: Pulling from remote: %{public}@", remote) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -166,7 +173,7 @@ extension LibGit2 {
             let received = progress.pointee.received_objects
             let total = progress.pointee.total_objects
             let percent = total > 0 ? Float(received) / Float(total) * 100 : 0
-            os_log("🐚 LibGit2: Fetch progress: %.1f%%", percent)
+            if networkVerbose { os_log("🐚 LibGit2: Fetch progress: %.1f%%", percent) }
             return 0
         }
 
@@ -195,7 +202,7 @@ extension LibGit2 {
                 }
             }
 
-            os_log("❌ LibGit2: Fetch failed with code %d: %{public}@", fetchResult, errorMessage)
+            if networkVerbose { os_log("❌ LibGit2: Fetch failed with code %d: %{public}@", fetchResult, errorMessage) }
 
             // 检查是否是认证错误
             if isAuthenticationError(fetchResult, errorMessage: errorMessage) {
@@ -239,7 +246,7 @@ extension LibGit2 {
 
         // 执行合并
         if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
-            os_log("🐚 LibGit2: Already up to date")
+            if networkVerbose { os_log("🐚 LibGit2: Already up to date") }
             return
         }
 

@@ -42,7 +42,7 @@ extension LibGit2 {
             // 获取分支名
             var namePtr: UnsafePointer<Int8>? = nil
             if git_branch_name(&namePtr, ref) == 0, let name = namePtr {
-                let branchName = String(cString: name)
+                _ = String(cString: name)
 
                 // 检查是否为当前分支
                 let isHead = git_branch_is_head(ref) == 1

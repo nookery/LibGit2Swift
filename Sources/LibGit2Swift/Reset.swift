@@ -9,8 +9,9 @@ extension LibGit2 {
     ///   - commitHash: 提交哈希（nil 表示 HEAD）
     ///   - mode: 重置模式（"soft", "mixed", "hard"）
     ///   - path: 仓库路径
-    public static func reset(to commitHash: String?, mode: String, at path: String) throws {
-        os_log("🐚 LibGit2: Resetting to %{public}@ with mode: %{public}@", commitHash ?? "HEAD", mode)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func reset(to commitHash: String?, mode: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Resetting to %{public}@ with mode: %{public}@", commitHash ?? "HEAD", mode) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -53,39 +54,43 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(commitHash ?? "HEAD")
         }
 
-        os_log("🐚 LibGit2: Reset completed")
+        if verbose { os_log("🐚 LibGit2: Reset completed") }
     }
 
     /// 软重置（保留工作区和暂存区变更）
     /// - Parameters:
     ///   - commitHash: 提交哈希（nil 表示 HEAD）
     ///   - path: 仓库路径
-    static func resetSoft(to commitHash: String?, at path: String) throws {
-        try reset(to: commitHash, mode: "soft", at: path)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetSoft(to commitHash: String?, at path: String, verbose: Bool = true) throws {
+        try reset(to: commitHash, mode: "soft", at: path, verbose: verbose)
     }
 
     /// 混合重置（保留工作区变更，清空暂存区）
     /// - Parameters:
     ///   - commitHash: 提交哈希（nil 表示 HEAD）
     ///   - path: 仓库路径
-    static func resetMixed(to commitHash: String?, at path: String) throws {
-        try reset(to: commitHash, mode: "mixed", at: path)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetMixed(to commitHash: String?, at path: String, verbose: Bool = true) throws {
+        try reset(to: commitHash, mode: "mixed", at: path, verbose: verbose)
     }
 
     /// 硬重置（丢弃所有变更）
     /// - Parameters:
     ///   - commitHash: 提交哈希（nil 表示 HEAD）
     ///   - path: 仓库路径
-    static func resetHard(to commitHash: String?, at path: String) throws {
-        try reset(to: commitHash, mode: "hard", at: path)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetHard(to commitHash: String?, at path: String, verbose: Bool = true) throws {
+        try reset(to: commitHash, mode: "hard", at: path, verbose: verbose)
     }
 
     /// 重置指定文件（从暂存区移除）
     /// - Parameters:
     ///   - filePath: 文件路径
     ///   - path: 仓库路径
-    static func resetFile(_ filePath: String, at path: String) throws {
-        os_log("🐚 LibGit2: Resetting file: %{public}@", filePath)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetFile(_ filePath: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Resetting file: %{public}@", filePath) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -102,18 +107,20 @@ extension LibGit2 {
 
         if result != 0 {
             // 文件可能不在 index 中
-            os_log("⚠️ LibGit2: File not in index: %{public}@", filePath)
+            if verbose { os_log("⚠️ LibGit2: File not in index: %{public}@", filePath) }
         }
 
         git_index_write(index!)
 
-        os_log("🐚 LibGit2: File reset: %{public}@", filePath)
+        if verbose { os_log("🐚 LibGit2: File reset: %{public}@", filePath) }
     }
 
     /// 重置所有暂存区文件
-    /// - Parameter path: 仓库路径
-    static func resetStaged(at path: String) throws {
-        os_log("🐚 LibGit2: Resetting all staged files")
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetStaged(at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Resetting all staged files") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -129,7 +136,7 @@ extension LibGit2 {
         git_index_clear(index!)
         git_index_write(index!)
 
-        os_log("🐚 LibGit2: All staged files reset")
+        if verbose { os_log("🐚 LibGit2: All staged files reset") }
     }
 
     /// 重置到指定提交（保留部分文件）
@@ -138,8 +145,9 @@ extension LibGit2 {
     ///   - paths: 要保留的文件路径列表
     ///   - resetMode: 重置模式
     ///   - repoPath: 仓库路径
-    static func resetToCommitKeepingFiles(_ commitHash: String, keeping paths: [String], mode resetMode: String, at repoPath: String) throws {
-        os_log("🐚 LibGit2: Resetting to %{public}@ keeping files", commitHash)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func resetToCommitKeepingFiles(_ commitHash: String, keeping paths: [String], mode resetMode: String, at repoPath: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Resetting to %{public}@ keeping files", commitHash) }
 
         let repo = try openRepository(at: repoPath)
         defer { git_repository_free(repo) }
@@ -173,6 +181,6 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(commitHash)
         }
 
-        os_log("🐚 LibGit2: Reset completed keeping specified files")
+        if verbose { os_log("🐚 LibGit2: Reset completed keeping specified files") }
     }
 }

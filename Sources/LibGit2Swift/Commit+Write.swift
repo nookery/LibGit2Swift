@@ -8,9 +8,10 @@ extension LibGit2 {
     /// - Parameters:
     ///   - message: 提交信息
     ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 创建的提交哈希
-    public static func createCommit(message: String, at path: String) throws -> String {
-        os_log("🐚 LibGit2: Creating commit with message: %{public}@", message)
+    public static func createCommit(message: String, at path: String, verbose: Bool = true) throws -> String {
+        if verbose { os_log("🐚 LibGit2: Creating commit with message: %{public}@", message) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -75,7 +76,7 @@ extension LibGit2 {
         let signResult = git_signature_now(&signature, userName, userEmail)
         if signResult != 0 {
             // 如果配置失败，使用默认值
-            os_log("⚠️ LibGit2: Failed to create signature, using defaults")
+            if verbose { os_log("⚠️ LibGit2: Failed to create signature, using defaults") }
             git_signature_now(&signature, "GitOK User", "gitok@example.com")
         }
 
@@ -101,7 +102,7 @@ extension LibGit2 {
         }
 
         let commitHash = oidToString(commitOID)
-        os_log("🐚 LibGit2: Commit created successfully: %{public}@", commitHash)
+        if verbose { os_log("🐚 LibGit2: Commit created successfully: %{public}@", commitHash) }
 
         return commitHash
     }

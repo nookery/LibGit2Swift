@@ -5,9 +5,11 @@ import OSLog
 /// LibGit2 状态检查操作扩展
 extension LibGit2 {
     /// 检查是否有未提交的变更
-    /// - Parameter path: 仓库路径
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 如果有未提交的变更返回 true
-    public static func hasUncommittedChanges(at path: String) throws -> Bool {
+    public static func hasUncommittedChanges(at path: String, verbose: Bool = true) throws -> Bool {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
@@ -28,7 +30,7 @@ extension LibGit2 {
 
         let count = git_status_list_entrycount(statusList!)
 
-        os_log("🐚 LibGit2: Uncommitted changes count: %d", count)
+        if verbose { os_log("🐚 LibGit2: Uncommitted changes count: %d", count) }
 
         return count > 0
     }

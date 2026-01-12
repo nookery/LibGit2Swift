@@ -8,21 +8,22 @@ extension LibGit2 {
     /// - Parameters:
     ///   - message: 暂存信息（可选）
     ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 暂存索引
-    static func stash(message: String? = nil, at path: String) throws -> Int {
-        os_log("🐚 LibGit2: Stashing changes")
+    static func stash(message: String? = nil, at path: String, verbose: Bool = true) throws -> Int {
+        if verbose { os_log("🐚 LibGit2: Stashing changes") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
         // 检查是否有变更
         if !(try hasUncommittedChanges(at: path)) {
-            os_log("🐚 LibGit2: No changes to stash")
+            if verbose { os_log("🐚 LibGit2: No changes to stash") }
             return -1
         }
 
         // 创建签名
-        let (configName, configEmail) = try getUserConfig(at: path)
+        let (configName, configEmail) = try getUserConfig(at: path, verbose: verbose)
         var signature: UnsafeMutablePointer<git_signature>? = nil
         defer { if let sig = signature { git_signature_free(sig) } }
         git_signature_now(&signature, configName, configEmail)
@@ -43,7 +44,7 @@ extension LibGit2 {
         // 获取 stash 索引
         let stashIndex = try getStashCount(at: path) - 1
 
-        os_log("🐚 LibGit2: Changes stashed at index: %d", stashIndex)
+        if verbose { os_log("🐚 LibGit2: Changes stashed at index: %d", stashIndex) }
 
         return stashIndex
     }
@@ -52,8 +53,9 @@ extension LibGit2 {
     /// - Parameters:
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
-    static func stashPop(index: Int = 0, at path: String) throws {
-        os_log("🐚 LibGit2: Popping stash at index: %d", index)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func stashPop(index: Int = 0, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Popping stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -67,15 +69,16 @@ extension LibGit2 {
             throw LibGit2Error.commitFailed
         }
 
-        os_log("🐚 LibGit2: Stash popped successfully")
+        if verbose { os_log("🐚 LibGit2: Stash popped successfully") }
     }
 
     /// 应用暂存的变更（不从 stash 列表中删除）
     /// - Parameters:
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
-    static func stashApply(index: Int = 0, at path: String) throws {
-        os_log("🐚 LibGit2: Applying stash at index: %d", index)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func stashApply(index: Int = 0, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Applying stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -91,7 +94,7 @@ extension LibGit2 {
             throw LibGit2Error.commitFailed
         }
 
-        os_log("🐚 LibGit2: Stash applied successfully")
+        if verbose { os_log("🐚 LibGit2: Stash applied successfully") }
     }
 
     /// 获取暂存列表
@@ -145,8 +148,9 @@ extension LibGit2 {
     /// - Parameters:
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
-    static func stashDrop(index: Int = 0, at path: String) throws {
-        os_log("🐚 LibGit2: Dropping stash at index: %d", index)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func stashDrop(index: Int = 0, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Dropping stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -157,13 +161,15 @@ extension LibGit2 {
             throw LibGit2Error.commitFailed
         }
 
-        os_log("🐚 LibGit2: Stash dropped successfully")
+        if verbose { os_log("🐚 LibGit2: Stash dropped successfully") }
     }
 
     /// 清空所有暂存
-    /// - Parameter path: 仓库路径
-    static func stashClear(at path: String) throws {
-        os_log("🐚 LibGit2: Clearing all stashes")
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func stashClear(at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Clearing all stashes") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -175,7 +181,7 @@ extension LibGit2 {
             git_stash_drop(repo, i)
         }
 
-        os_log("🐚 LibGit2: All stashes cleared")
+        if verbose { os_log("🐚 LibGit2: All stashes cleared") }
     }
 
     /// 获取暂存数量

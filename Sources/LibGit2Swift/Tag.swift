@@ -48,8 +48,8 @@ extension LibGit2 {
     ///   - message: 标签信息（nil 表示轻量标签）
     ///   - commitHash: 提交哈希（nil 表示使用 HEAD）
     ///   - path: 仓库路径
-    public static func createTag(named name: String, message: String? = nil, at commitHash: String? = nil, in path: String) throws {
-        os_log("🐚 LibGit2: Creating tag: %{public}@", name)
+    public static func createTag(named name: String, message: String? = nil, at commitHash: String? = nil, in path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Creating tag: %{public}@", name) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -110,15 +110,15 @@ extension LibGit2 {
             throw LibGit2Error.invalidValue
         }
 
-        os_log("🐚 LibGit2: Tag created: %{public}@", name)
+        if verbose { os_log("🐚 LibGit2: Tag created: %{public}@", name) }
     }
 
     /// 删除标签
     /// - Parameters:
     ///   - name: 标签名称
     ///   - path: 仓库路径
-    public static func deleteTag(named name: String, at path: String) throws {
-        os_log("🐚 LibGit2: Deleting tag: %{public}@", name)
+    public static func deleteTag(named name: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Deleting tag: %{public}@", name) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -129,7 +129,7 @@ extension LibGit2 {
             throw LibGit2Error.invalidValue
         }
 
-        os_log("🐚 LibGit2: Tag deleted: %{public}@", name)
+        if verbose { os_log("🐚 LibGit2: Tag deleted: %{public}@", name) }
     }
 
     /// 获取标签指向的提交哈希

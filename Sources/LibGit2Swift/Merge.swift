@@ -8,8 +8,9 @@ extension LibGit2 {
     /// - Parameters:
     ///   - branchName: 要合并的分支名称
     ///   - path: 仓库路径
-    public static func merge(branchName: String, at path: String) throws {
-        os_log("🐚 LibGit2: Merging branch: %{public}@", branchName)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func merge(branchName: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Merging branch: %{public}@", branchName) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -56,7 +57,7 @@ extension LibGit2 {
 
         // 检查是否已经是最新
         if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
-            os_log("🐚 LibGit2: Already up to date")
+            if verbose { os_log("🐚 LibGit2: Already up to date") }
             return
         }
 
@@ -76,22 +77,22 @@ extension LibGit2 {
 
         // 检查是否有冲突
         if try hasMergeConflicts(at: path) {
-            os_log("⚠️ LibGit2: Merge conflicts detected")
+            if verbose { os_log("⚠️ LibGit2: Merge conflicts detected") }
             throw LibGit2Error.mergeConflict
         }
 
         // 创建合并提交
         try createMergeCommit(branchName: branchName, at: path)
 
-        os_log("🐚 LibGit2: Merge completed successfully")
+        if verbose { os_log("🐚 LibGit2: Merge completed successfully") }
     }
 
     /// 快进合并
     /// - Parameters:
     ///   - branchName: 要合并的分支名称
     ///   - path: 仓库路径
-    static func mergeFastForward(branchName: String, at path: String) throws {
-        os_log("🐚 LibGit2: Fast-forward merging branch: %{public}@", branchName)
+    static func mergeFastForward(branchName: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Fast-forward merging branch: %{public}@", branchName) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -149,7 +150,7 @@ extension LibGit2 {
             }
         }
 
-        os_log("🐚 LibGit2: Fast-forward merge completed")
+        if verbose { os_log("🐚 LibGit2: Fast-forward merge completed") }
     }
 
     /// 获取合并冲突文件列表
@@ -205,8 +206,8 @@ extension LibGit2 {
 
     /// 中止合并
     /// - Parameter path: 仓库路径
-    static func abortMerge(at path: String) throws {
-        os_log("🐚 LibGit2: Aborting merge")
+    static func abortMerge(at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Aborting merge") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -225,15 +226,15 @@ extension LibGit2 {
             }
         }
 
-        os_log("🐚 LibGit2: Merge aborted")
+        if verbose { os_log("🐚 LibGit2: Merge aborted") }
     }
 
     /// 继续合并（解决冲突后创建合并提交）
     /// - Parameters:
     ///   - branchName: 分支名称
     ///   - path: 仓库路径
-    static func continueMerge(branchName: String, at path: String) throws {
-        os_log("🐚 LibGit2: Continuing merge")
+    static func continueMerge(branchName: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Continuing merge") }
 
         // 创建合并提交
         try createMergeCommit(branchName: branchName, at: path)
@@ -244,13 +245,13 @@ extension LibGit2 {
 
         git_repository_state_cleanup(repo)
 
-        os_log("🐚 LibGit2: Merge continued")
+        if verbose { os_log("🐚 LibGit2: Merge continued") }
     }
 
     // MARK: - 私有辅助方法
 
     /// 创建合并提交
-    private static func createMergeCommit(branchName: String, at path: String) throws {
+    private static func createMergeCommit(branchName: String, at path: String, verbose: Bool = true) throws {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 

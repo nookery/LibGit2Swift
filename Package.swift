@@ -17,6 +17,7 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/bdewey/static-libgit2.git", from: "0.5.0"),
+        .package(url: "https://github.com/nookery/MagicLog.git", branch: "main"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -25,6 +26,7 @@ let package = Package(
             name: "LibGit2Swift",
             dependencies: [
                 .product(name: "static-libgit2", package: "static-libgit2"),
+                .product(name: "MagicLog", package: "MagicLog"),
             ]),
         .testTarget(
             name: "LibGit2SwiftTests",

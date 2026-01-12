@@ -65,8 +65,9 @@ extension LibGit2 {
     ///   - name: 远程仓库名称
     ///   - url: 远程仓库 URL
     ///   - path: 仓库路径
-    public static func addRemote(name: String, url: String, at path: String) throws {
-        os_log("🐚 LibGit2: Adding remote: %{public}@ -> %{public}@", name, url)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func addRemote(name: String, url: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Adding remote: %{public}@ -> %{public}@", name, url) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -80,15 +81,16 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(name)
         }
 
-        os_log("🐚 LibGit2: Remote added: %{public}@", name)
+        if verbose { os_log("🐚 LibGit2: Remote added: %{public}@", name) }
     }
 
     /// 删除远程仓库
     /// - Parameters:
     ///   - name: 远程仓库名称
     ///   - path: 仓库路径
-    public static func removeRemote(name: String, at path: String) throws {
-        os_log("🐚 LibGit2: Removing remote: %{public}@", name)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func removeRemote(name: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Removing remote: %{public}@", name) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -99,7 +101,7 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(name)
         }
 
-        os_log("🐚 LibGit2: Remote removed: %{public}@", name)
+        if verbose { os_log("🐚 LibGit2: Remote removed: %{public}@", name) }
     }
 
     /// 设置远程仓库 URL
@@ -107,8 +109,9 @@ extension LibGit2 {
     ///   - name: 远程仓库名称
     ///   - url: 新的 URL
     ///   - path: 仓库路径
-    public static func setRemoteURL(name: String, url: String, at path: String) throws {
-        os_log("🐚 LibGit2: Setting remote URL: %{public}@ -> %{public}@", name, url)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func setRemoteURL(name: String, url: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Setting remote URL: %{public}@ -> %{public}@", name, url) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -132,7 +135,7 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(name)
         }
 
-        os_log("🐚 LibGit2: Remote URL updated: %{public}@", name)
+        if verbose { os_log("🐚 LibGit2: Remote URL updated: %{public}@", name) }
     }
 
     /// 获取远程仓库的 URL
@@ -181,8 +184,9 @@ extension LibGit2 {
     ///   - oldName: 旧名称
     ///   - newName: 新名称
     ///   - path: 仓库路径
-    public static func renameRemote(oldName: String, to newName: String, at path: String) throws {
-        os_log("🐚 LibGit2: Renaming remote: %{public}@ -> %{public}@", oldName, newName)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func renameRemote(oldName: String, to newName: String, at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Renaming remote: %{public}@ -> %{public}@", oldName, newName) }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -196,6 +200,6 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(oldName)
         }
 
-        os_log("🐚 LibGit2: Remote renamed")
+        if verbose { os_log("🐚 LibGit2: Remote renamed") }
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import Clibgit2
 import OSLog
+import MagicLog
 
 /// LibGit2 添加文件操作扩展
 extension LibGit2 {
@@ -8,8 +9,9 @@ extension LibGit2 {
     /// - Parameters:
     ///   - files: 要添加的文件路径列表（空数组表示添加所有变更）
     ///   - path: 仓库路径
-    public static func addFiles(_ files: [String], at path: String) throws {
-        os_log("🐚 LibGit2: Adding files to staging area")
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func addFiles(_ files: [String], at path: String, verbose: Bool = true) throws {
+        if verbose { os_log("🐚 LibGit2: Adding files to staging area") }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -52,7 +54,7 @@ extension LibGit2 {
                             if let filePath = pathPtr {
                                 let result = git_index_add_bypath(indexPtr, filePath)
                                 if result != 0 {
-                                    os_log("⚠️ LibGit2: Failed to add file: %{public}@", String(cString: filePath))
+                                    if verbose { os_log("⚠️ LibGit2: Failed to add file: %{public}@", String(cString: filePath)) }
                                 }
                             }
                         }
@@ -80,18 +82,18 @@ extension LibGit2 {
                     }
 
                     if result != 0 {
-                        os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result)
+                        if verbose { os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result) }
                     } else {
-                        os_log("🐚 LibGit2: Added files with pattern: %{public}@", file)
+                        if verbose { os_log("🐚 LibGit2: Added files with pattern: %{public}@", file) }
                     }
 
                     // 清理
                     free(cString)
 
                     if result != 0 {
-                        os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result)
+                        if verbose { os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result) }
                     } else {
-                        os_log("🐚 LibGit2: Added files with pattern: %{public}@", file)
+                        if verbose { os_log("🐚 LibGit2: Added files with pattern: %{public}@", file) }
                     }
                 } else {
                     // 首先尝试添加文件（用于新增或修改的文件）
@@ -101,12 +103,12 @@ extension LibGit2 {
                         result = git_index_remove_bypath(indexPtr, file)
                         if result != 0 {
                             // 对于真正不存在的文件，我们不抛出错误，而是继续处理
-                            os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@ (error: %d), continuing...", file, result)
+                            if verbose { os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@ (error: %d), continuing...", file, result) }
                         } else {
-                            os_log("🐚 LibGit2: Removed file: %{public}@", file)
+                            if verbose { os_log("🐚 LibGit2: Removed file: %{public}@", file) }
                         }
                     } else {
-                        os_log("🐚 LibGit2: Added file: %{public}@", file)
+                        if verbose { os_log("🐚 LibGit2: Added file: %{public}@", file) }
                     }
                 }
             }
@@ -118,20 +120,23 @@ extension LibGit2 {
             throw LibGit2Error.cannotGetIndex
         }
 
-        os_log("🐚 LibGit2: Files added successfully")
+        if verbose { os_log("🐚 LibGit2: Files added successfully") }
     }
 
     /// 添加单个文件到暂存区
     /// - Parameters:
     ///   - file: 文件路径
     ///   - path: 仓库路径
-    static func addFile(_ file: String, at path: String) throws {
-        try addFiles([file], at: path)
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func addFile(_ file: String, at path: String, verbose: Bool = true) throws {
+        try addFiles([file], at: path, verbose: verbose)
     }
 
     /// 添加所有变更到暂存区
-    /// - Parameter path: 仓库路径
-    static func addAll(at path: String) throws {
-        try addFiles([], at: path)
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
+    static func addAll(at path: String, verbose: Bool = true) throws {
+        try addFiles([], at: path, verbose: verbose)
     }
 }

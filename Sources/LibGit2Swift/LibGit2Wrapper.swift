@@ -1,12 +1,14 @@
 import Foundation
 import Clibgit2
 import OSLog
+import MagicLog
 
 /// libgit2 C 库的 Swift 封装
 /// 提供类型安全的接口和自动内存管理
 /// libgit2 C 库的 Swift 封装
 /// 提供类型安全的接口和自动内存管理
-public class LibGit2 {
+public class LibGit2: SuperLog {
+    public static let emoji = "🗂️"
     /// 初始化 libgit2（应用启动时调用一次）
     public static func initialize() {
         git_libgit2_init()
@@ -29,9 +31,10 @@ public class LibGit2 {
     /// - Parameters:
     ///   - key: 配置键（如 "user.name"）
     ///   - repoPath: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 配置值
-    public static func getConfig(key: String, at repoPath: String) throws -> String {
-        os_log("🐚 LibGit2: Getting config for key: %{public}@ at path: %{public}@", key, repoPath)
+    public static func getConfig(key: String, at repoPath: String, verbose: Bool = true) throws -> String {
+        print("\(LibGit2.t)Getting config for key: \(key) at path: \(repoPath)")
         
         var repo: OpaquePointer? = nil
         var config: OpaquePointer? = nil
@@ -53,21 +56,21 @@ public class LibGit2 {
                     let getResult = git_config_get_string(&outPtr, configSnapshot, key)
                     if getResult == 0, let cString = outPtr {
                         let value = String(cString: cString)
-                        os_log("🐚 LibGit2: Config found in repo: %{public}@ = %{public}@", key, value)
+                        if verbose { os_log("\(LibGit2.t)Config found in repo: \(key) = \(value)") }
                         return value
                     }
-                    os_log("🐚 LibGit2: Key not found in repo snapshot, code: %d", getResult)
+                    if verbose { os_log("\(LibGit2.t)Key not found in repo snapshot, code: \(getResult)") }
                     // 清理 snapshot 以便后面 fallback 使用
                     git_config_free(snapshot)
                     snapshot = nil
                 }
             }
         } else {
-            os_log("🐚 LibGit2: Could not open repo at %{public}@, trying default config", repoPath)
+            if verbose { os_log("\(LibGit2.t)Could not open repo at \(repoPath), trying default config") }
         }
         
         // 2. Fallback: 直接读取默认全局配置
-        os_log("🐚 LibGit2: Attempting fallback to default (global) config for key: %{public}@", key)
+        if verbose { os_log("\(LibGit2.t)Attempting fallback to default (global) config for key: \(key)") }
         var defaultConfig: OpaquePointer? = nil
         defer { if defaultConfig != nil { git_config_free(defaultConfig) } }
         
@@ -76,10 +79,10 @@ public class LibGit2 {
                 let getResult = git_config_get_string(&outPtr, configSnapshot, key)
                 if getResult == 0, let cString = outPtr {
                     let value = String(cString: cString)
-                    os_log("🐚 LibGit2: Config found in default/global config: %{public}@ = %{public}@", key, value)
+                    if verbose { os_log("\(LibGit2.t)Config found in default/global config: \(key) = \(value)") }
                     return value
                 }
-                os_log("🐚 LibGit2: Key not found in default snapshot: %{public}@", lastError())
+                if verbose { os_log("\(LibGit2.t)Key not found in default snapshot: \(lastError())") }
             }
         }
         
@@ -91,8 +94,9 @@ public class LibGit2 {
     ///   - key: 配置键（如 "user.name"）
     ///   - value: 配置值
     ///   - repoPath: 仓库路径
-    public static func setConfig(key: String, value: String, at repoPath: String) throws {
-        os_log("🐚 LibGit2: Setting config for key: %{public}@ at path: %{public}@", key, repoPath)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func setConfig(key: String, value: String, at repoPath: String, verbose: Bool = true) throws {
+        if verbose { os_log("\(LibGit2.t)Setting config for key: \(key) at path: \(repoPath)") }
 
         let repo = try openRepository(at: repoPath)
         defer { git_repository_free(repo) }
@@ -120,15 +124,17 @@ public class LibGit2 {
             }
         }
 
-        os_log("🐚 LibGit2: Config set successfully: %{public}@ = %{public}@", key, value)
+            if verbose { os_log("\(LibGit2.t)Config set successfully: \(key) = \(value)") }
     }
 
     /// 获取用户配置（用户名和邮箱）
-    /// - Parameter repoPath: 仓库路径
+    /// - Parameters:
+    ///   - repoPath: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: (用户名, 邮箱)元组
-    public static func getUserConfig(at repoPath: String) throws -> (name: String, email: String) {
-        let name = try getConfig(key: "user.name", at: repoPath)
-        let email = try getConfig(key: "user.email", at: repoPath)
+    public static func getUserConfig(at repoPath: String, verbose: Bool = true) throws -> (name: String, email: String) {
+        let name = try getConfig(key: "user.name", at: repoPath, verbose: verbose)
+        let email = try getConfig(key: "user.email", at: repoPath, verbose: verbose)
         return (name, email)
     }
 
@@ -137,39 +143,46 @@ public class LibGit2 {
     ///   - name: 用户名
     ///   - email: 用户邮箱
     ///   - repoPath: 仓库路径
-    public static func setUserConfig(name: String, email: String, at repoPath: String) throws {
-        try setConfig(key: "user.name", value: name, at: repoPath)
-        try setConfig(key: "user.email", value: email, at: repoPath)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func setUserConfig(name: String, email: String, at repoPath: String, verbose: Bool = true) throws {
+        try setConfig(key: "user.name", value: name, at: repoPath, verbose: verbose)
+        try setConfig(key: "user.email", value: email, at: repoPath, verbose: verbose)
     }
 
     /// 获取用户名
-    /// - Parameter repoPath: 仓库路径
+    /// - Parameters:
+    ///   - repoPath: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 用户名
-    public static func getUserName(at repoPath: String) throws -> String {
-        return try getConfig(key: "user.name", at: repoPath)
+    public static func getUserName(at repoPath: String, verbose: Bool = true) throws -> String {
+        return try getConfig(key: "user.name", at: repoPath, verbose: verbose)
     }
 
     /// 获取用户邮箱
-    /// - Parameter repoPath: 仓库路径
+    /// - Parameters:
+    ///   - repoPath: 仓库路径
+    ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 用户邮箱
-    public static func getUserEmail(at repoPath: String) throws -> String {
-        return try getConfig(key: "user.email", at: repoPath)
+    public static func getUserEmail(at repoPath: String, verbose: Bool = true) throws -> String {
+        return try getConfig(key: "user.email", at: repoPath, verbose: verbose)
     }
 
     /// 设置用户名
     /// - Parameters:
     ///   - name: 用户名
     ///   - repoPath: 仓库路径
-    public static func setUserName(name: String, at repoPath: String) throws {
-        try setConfig(key: "user.name", value: name, at: repoPath)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func setUserName(name: String, at repoPath: String, verbose: Bool = true) throws {
+        try setConfig(key: "user.name", value: name, at: repoPath, verbose: verbose)
     }
 
     /// 设置用户邮箱
     /// - Parameters:
     ///   - email: 用户邮箱
     ///   - repoPath: 仓库路径
-    public static func setUserEmail(email: String, at repoPath: String) throws {
-        try setConfig(key: "user.email", value: email, at: repoPath)
+    ///   - verbose: 是否输出详细日志，默认为true
+    public static func setUserEmail(email: String, at repoPath: String, verbose: Bool = true) throws {
+        try setConfig(key: "user.email", value: email, at: repoPath, verbose: verbose)
     }
 
     // MARK: - 辅助函数
