@@ -1,7 +1,7 @@
-import Foundation
 import Clibgit2
-import OSLog
+import Foundation
 import MagicLog
+import OSLog
 
 /// libgit2 C 库的 Swift 封装
 /// 提供类型安全的接口和自动内存管理
@@ -13,12 +13,12 @@ public class LibGit2: SuperLog {
     public static func initialize() {
         git_libgit2_init()
     }
-    
+
     /// 清理 libgit2（应用退出时调用）
     public static func shutdown() {
         git_libgit2_shutdown()
     }
-    
+
     /// 获取 libgit2 最后一次发生的错误描述
     private static func lastError() -> String {
         if let error = git_error_last() {
@@ -34,19 +34,19 @@ public class LibGit2: SuperLog {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 配置值
     public static func getConfig(key: String, at repoPath: String, verbose: Bool = true) throws -> String {
-        print("\(LibGit2.t)Getting config for key: \(key) at path: \(repoPath)")
-        
-        var repo: OpaquePointer? = nil
-        var config: OpaquePointer? = nil
-        var snapshot: OpaquePointer? = nil
-        var outPtr: UnsafePointer<CChar>? = nil
-        
+        if verbose { os_log("\(t)Getting config for key: \(key) at path: \(repoPath)") }
+
+        var repo: OpaquePointer?
+        var config: OpaquePointer?
+        var snapshot: OpaquePointer?
+        var outPtr: UnsafePointer<CChar>?
+
         defer {
             if snapshot != nil { git_config_free(snapshot) }
             if config != nil { git_config_free(config) }
             if repo != nil { git_repository_free(repo) }
         }
-        
+
         // 1. 尝试通过仓库获取配置
         let openResult = git_repository_open(&repo, repoPath)
         if openResult == 0, let repository = repo {
@@ -68,12 +68,12 @@ public class LibGit2: SuperLog {
         } else {
             if verbose { os_log("\(LibGit2.t)Could not open repo at \(repoPath), trying default config") }
         }
-        
+
         // 2. Fallback: 直接读取默认全局配置
         if verbose { os_log("\(LibGit2.t)Attempting fallback to default (global) config for key: \(key)") }
-        var defaultConfig: OpaquePointer? = nil
+        var defaultConfig: OpaquePointer?
         defer { if defaultConfig != nil { git_config_free(defaultConfig) } }
-        
+
         if git_config_open_default(&defaultConfig) == 0, let configuration = defaultConfig {
             if git_config_snapshot(&snapshot, configuration) == 0, let configSnapshot = snapshot {
                 let getResult = git_config_get_string(&outPtr, configSnapshot, key)
@@ -85,7 +85,7 @@ public class LibGit2: SuperLog {
                 if verbose { os_log("\(LibGit2.t)Key not found in default snapshot: \(lastError())") }
             }
         }
-        
+
         throw LibGit2Error.configKeyNotFound(key)
     }
 
@@ -101,7 +101,7 @@ public class LibGit2: SuperLog {
         let repo = try openRepository(at: repoPath)
         defer { git_repository_free(repo) }
 
-        var config: OpaquePointer? = nil
+        var config: OpaquePointer?
         defer { if config != nil { git_config_free(config) } }
 
         guard git_repository_config(&config, repo) == 0,
@@ -124,7 +124,7 @@ public class LibGit2: SuperLog {
             }
         }
 
-            if verbose { os_log("\(LibGit2.t)Config set successfully: \(key) = \(value)") }
+        if verbose { os_log("\(LibGit2.t)Config set successfully: \(key) = \(value)") }
     }
 
     /// 获取用户配置（用户名和邮箱）
@@ -197,7 +197,7 @@ public class LibGit2: SuperLog {
 
     /// 打开仓库
     public static func openRepository(at path: String) throws -> OpaquePointer {
-        var repo: OpaquePointer? = nil
+        var repo: OpaquePointer?
         let result = git_repository_open(&repo, path)
 
         if result != 0 {
@@ -229,8 +229,8 @@ public enum LibGit2Error: Error, LocalizedError {
     case addFileFailed(String)
     case checkoutFailed(String)
     case remoteNotFound(String)
-    case pushFailed(String)  // 修改：携带详细错误消息
-    case pullFailed(String)  // 修改：携带详细错误消息
+    case pushFailed(String) // 修改：携带详细错误消息
+    case pullFailed(String) // 修改：携带详细错误消息
     case cloneFailed
     case mergeConflict
     case invalidRepository
@@ -240,11 +240,11 @@ public enum LibGit2Error: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .repositoryNotFound(let path):
+        case let .repositoryNotFound(path):
             return "Git repository not found at: \(path)"
         case .configNotFound:
             return "Failed to get git configuration"
-        case .configKeyNotFound(let key):
+        case let .configKeyNotFound(key):
             return "Configuration key not found: \(key)"
         case .invalidValue:
             return "Invalid configuration value"
@@ -262,16 +262,16 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Nothing to commit"
         case .commitFailed:
             return "Failed to create commit"
-        case .addFileFailed(let file):
+        case let .addFileFailed(file):
             return "Failed to add file: \(file)"
-        case .checkoutFailed(let branch):
+        case let .checkoutFailed(branch):
             return "Failed to checkout branch: \(branch)"
-        case .remoteNotFound(let remote):
+        case let .remoteNotFound(remote):
             return "Remote not found: \(remote)"
-        case .pushFailed(let message):
-            return message  // 修改：使用详细错误消息
-        case .pullFailed(let message):
-            return message  // 修改：使用详细错误消息
+        case let .pushFailed(message):
+            return message // 修改：使用详细错误消息
+        case let .pullFailed(message):
+            return message // 修改：使用详细错误消息
         case .cloneFailed:
             return "Failed to clone repository"
         case .mergeConflict:
@@ -280,7 +280,7 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Invalid repository"
         case .invalidReference:
             return "Invalid reference"
-        case .networkError(let code):
+        case let .networkError(code):
             return "Network error occurred: \(code)"
         case .authenticationError:
             return "Authentication failed"

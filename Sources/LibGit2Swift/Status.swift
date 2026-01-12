@@ -30,7 +30,7 @@ extension LibGit2 {
 
         let count = git_status_list_entrycount(statusList!)
 
-        if verbose { os_log("🐚 LibGit2: Uncommitted changes count: %d", count) }
+        if verbose { os_log("\(t)Uncommitted changes count: \(count)") }
 
         return count > 0
     }
@@ -38,7 +38,8 @@ extension LibGit2 {
     /// 获取状态信息（类似 git status）
     /// - Parameter path: 仓库路径
     /// - Returns: 状态信息字符串
-    public static func getStatus(at path: String) throws -> String {
+    public static func getStatus(at path: String, verbose: Bool = true) throws -> String {
+        if verbose { os_log("\(t) Getting status at path: \(path)") }
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
