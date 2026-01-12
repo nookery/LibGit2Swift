@@ -2,6 +2,36 @@ import Foundation
 import Clibgit2
 import OSLog
 
+// MARK: - Authentication Error Detection
+
+/// 检查错误是否是认证错误
+/// - Parameters:
+///   - errorCode: libgit2 错误代码
+///   - errorMessage: 错误消息
+/// - Returns: 如果是认证错误返回 true
+private func isAuthenticationError(_ errorCode: Int32, errorMessage: String) -> Bool {
+    // 检查错误代码是否是 GIT_EUSER (-3) 或其他认证相关错误
+    if errorCode == Int32(GIT_EUSER.rawValue) {
+        return true
+    }
+
+    // 检查错误消息中是否包含认证相关的关键词
+    let lowercasedMessage = errorMessage.lowercased()
+    let authKeywords = [
+        "authentication",
+        "auth",
+        "credential",
+        "permission",
+        "denied",
+        "unauthorized",
+        "401",
+        "403",
+        "forbidden"
+    ]
+
+    return authKeywords.contains { lowercasedMessage.contains($0) }
+}
+
 /// LibGit2 网络操作扩展（push, pull, clone）
 extension LibGit2 {
     /// 推送到远程仓库
@@ -80,6 +110,12 @@ extension LibGit2 {
             }
 
             os_log("❌ LibGit2: Push failed with code %d: %{public}@", result_strarray, errorMessage)
+
+            // 检查是否是认证错误
+            if isAuthenticationError(result_strarray, errorMessage: errorMessage) {
+                throw LibGit2Error.authenticationError
+            }
+
             throw LibGit2Error.pushFailed(errorMessage)
         }
 
@@ -150,12 +186,23 @@ extension LibGit2 {
         }
 
         if fetchResult != 0 {
+            var errorMessage = "Unknown fetch error"
+
             if let error = git_error_last() {
                 let message = String(cString: error.pointee.message)
-                os_log("❌ LibGit2: Fetch failed: %{public}@", message)
-                throw LibGit2Error.pullFailed(message)
+                if !message.isEmpty {
+                    errorMessage = message
+                }
             }
-            throw LibGit2Error.pullFailed("Unknown fetch error")
+
+            os_log("❌ LibGit2: Fetch failed with code %d: %{public}@", fetchResult, errorMessage)
+
+            // 检查是否是认证错误
+            if isAuthenticationError(fetchResult, errorMessage: errorMessage) {
+                throw LibGit2Error.authenticationError
+            }
+
+            throw LibGit2Error.pullFailed(errorMessage)
         }
 
         // 获取远程分支的 commit
