@@ -61,7 +61,13 @@ extension LibGit2 {
                 throw LibGit2Error.cannotGetIndex
             }
 
-            git_diff_index_to_workdir(&diff, repo, index, nil)
+            // 配置 diff 选项以包含未跟踪的文件
+            var diffOpts = git_diff_options()
+            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+            diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
+                            GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+
+            git_diff_index_to_workdir(&diff, repo, index, &diffOpts)
         }
 
         guard let diffPtr = diff else {

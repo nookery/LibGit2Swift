@@ -52,9 +52,14 @@ extension LibGit2 {
                                        ?? entry.pointee.head_to_index?.pointee.new_file.path
 
                             if let filePath = pathPtr {
-                                let result = git_index_add_bypath(indexPtr, filePath)
+                                // 首先尝试添加文件（用于新增或修改的文件）
+                                var result = git_index_add_bypath(indexPtr, filePath)
                                 if result != 0 {
-                                    if verbose { os_log("⚠️ LibGit2: Failed to add file: %{public}@", String(cString: filePath)) }
+                                    // 如果添加失败，尝试移除文件（用于删除的文件）
+                                    result = git_index_remove_bypath(indexPtr, filePath)
+                                    if result != 0 {
+                                        if verbose { os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@", String(cString: filePath)) }
+                                    }
                                 }
                             }
                         }
