@@ -10,29 +10,13 @@ echo "📁 Script directory: $SCRIPT_DIR"
 echo "📁 Repository root: $REPO_ROOT"
 echo "📁 Dependencies root: $DEPENDENCIES_ROOT"
 
-# Calculate total steps for progress tracking
-PLATFORM_COUNT=${#AVAILABLE_PLATFORMS[@]}
-STEPS_PER_PLATFORM=4  # openssl + libssh2 + libgit2 + combine
-TOTAL_STEPS=$((3 + PLATFORM_COUNT * STEPS_PER_PLATFORM))  # 3 = init + xcframework + modulemap
-CURRENT_STEP=0
-
-echo "📊 Total build steps: $TOTAL_STEPS"
-echo "🏗️  Platforms to build: ${AVAILABLE_PLATFORMS[@]}"
-echo ""
-
-# Progress tracking function
-show_progress() {
-    CURRENT_STEP=$((CURRENT_STEP + 1))
-    echo "📍 Step $CURRENT_STEP/$TOTAL_STEPS: $1"
-}
-
 echo "🧹 Cleaning up previous build artifacts..."
 rm -rf $DEPENDENCIES_ROOT
 mkdir $DEPENDENCIES_ROOT
 rm -rf $REPO_ROOT/Sources/Clibgit2.xcframework
 rm -rf $REPO_ROOT/install*
 mkdir $REPO_ROOT/install
-show_progress "Cleanup completed"
+echo "✅ Cleanup completed"
 
 AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 macosx-arm64 macosx)
 
@@ -54,6 +38,7 @@ function setup_variables() {
     cd $DEPENDENCIES_ROOT
     PLATFORM=$1
 
+    echo "⚙️  Setting up build environment for platform: $PLATFORM"
     CMAKE_ARGS=(-DBUILD_SHARED_LIBS=NO \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER_WORKS=ON \
@@ -97,6 +82,8 @@ function setup_variables() {
             echo "Unsupported or missing platform! Must be one of" ${AVAILABLE_PLATFORMS[@]}
             exit 1;;
     esac
+
+    echo "✅ Build environment setup completed for platform: $PLATFORM (ARCH: $ARCH)"
 }
 
 ### Build libpcre for a given platform
@@ -126,7 +113,7 @@ function build_libpcre() {
 
 ### Build openssl for a given platform
 function build_openssl() {
-    show_progress "Building OpenSSL 3.0.0 for platform: $1"
+    echo "🔐 Building OpenSSL 3.0.0 for platform: $1"
     setup_variables $1 install-openssl
 
     # It is better to remove and redownload the source since building make the source code directory dirty!
@@ -174,7 +161,7 @@ function build_openssl() {
 
 ### Build libssh2 for a given platform (assume openssl was built)
 function build_libssh2() {
-    show_progress "Building libssh2 1.10.0 for platform: $1"
+    echo "🔐 Building libssh2 1.10.0 for platform: $1"
     setup_variables $1 install-libssh2
 
     echo "📦 Downloading and extracting libssh2..."
@@ -203,7 +190,7 @@ function build_libssh2() {
 ### See @setup_variables for the list of available platform names
 ### Assume openssl and libssh2 was built
 function build_libgit2() {
-    show_progress "Building libgit2 v1.3.0 for platform: $1"
+    echo "📚 Building libgit2 v1.3.0 for platform: $1"
     setup_variables $1 install
 
     echo "📦 Downloading and extracting libgit2..."
@@ -248,14 +235,29 @@ function build_xcframework() {
     lipo "$INSTALLDIR/maccatalyst/lib/$FWNAME.a" "$INSTALLDIR/maccatalyst-arm64/lib/$FWNAME.a" -create -output "$INSTALLDIR/maccatalyst-fat/lib/$FWNAME.a"
     FRAMEWORKS_ARGS+=("-library" "$INSTALLDIR/maccatalyst-fat/lib/$FWNAME.a" "-headers" "$INSTALLDIR/maccatalyst/include")
 
-    echo "🏗️  Building $FWNAME XCFramework containing" ${PLATFORMS[@]}
-
+    # Filter out platforms that have been merged into fat binaries to avoid duplicate library definitions
+    local FILTERED_PLATFORMS=()
     for p in ${PLATFORMS[@]}; do
+        case $p in
+            macosx|macosx-arm64|maccatalyst|maccatalyst-arm64)
+                # Skip platforms that have been merged into fat binaries
+                continue
+                ;;
+            *)
+                FILTERED_PLATFORMS+=("$p")
+                ;;
+        esac
+    done
+
+    echo "🏗️  Building $FWNAME XCFramework containing macosx-fat maccatalyst-fat" ${FILTERED_PLATFORMS[@]}
+
+    for p in ${FILTERED_PLATFORMS[@]}; do
         FRAMEWORKS_ARGS+=("-library" "$INSTALLDIR/$p/lib/$FWNAME.a" "-headers" "$INSTALLDIR/$p/include")
     done
 
     cd $REPO_ROOT
     echo "📦 Creating XCFramework at Sources/$XCFRAMEWORKNAME.xcframework..."
+    mkdir -p Sources
     xcodebuild -create-xcframework ${FRAMEWORKS_ARGS[@]} -output Sources/$XCFRAMEWORKNAME.xcframework
     echo "✅ XCFramework creation completed"
 }
@@ -287,18 +289,18 @@ for p in ${AVAILABLE_PLATFORMS[@]}; do
     build_libgit2 $p
 
     # Put all of the generated *.a files into a single *.a file that will be in our framework
-    show_progress "Combining static libraries for $p"
+    echo "🔗 Combining static libraries for $p..."
     cd $REPO_ROOT
     libtool -v -static -o libgit2_all.a install-openssl/$p/lib/*.a install/$p/lib/*.a install-libssh2/$p/lib/*.a
     cp libgit2_all.a install/$p/lib
     rm libgit2_all.a
+    echo "✅ Library combination completed for $p"
 done
 
 echo ""
-show_progress "Creating final XCFramework"
+echo "🎯 Creating final XCFramework..."
 build_xcframework libgit2_all install Clibgit2
 cd $REPO_ROOT
-show_progress "Copying module map"
 copy_modulemap
 
 echo ""
