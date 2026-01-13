@@ -238,8 +238,3 @@ do {
 ## License
 
 This project is available under the MIT license. See the LICENSE file for more info.
-
-## Acknowledgments
-
-- Built on top of [libgit2](https://libgit2.org/)
-- Inspired by the need for a pure Swift Git library without shell dependencies
