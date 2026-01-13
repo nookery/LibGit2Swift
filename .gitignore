@@ -128,3 +128,13 @@ iOSInjectionProject/
 
 # Logs
 *.log
+
+# LibGit2Swift build artifacts
+dependencies/
+install/
+*.tar.gz
+*.zip
+install*
+dependencies
+.swiftpm
+.DS_Store

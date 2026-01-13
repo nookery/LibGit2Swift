@@ -82,6 +82,150 @@ Or add it via Xcode:
 2. Enter the repository URL: `https://github.com/nookery/LibGit2Swift.git`
 3. Select the version rule
 
+## Building
+
+### Dependency Versions
+
+- **libgit2**: v1.9.2 (December 2025)
+- **OpenSSL**: 3.4.3
+- **libssh2**: 1.11.1
+
+### Initial Build Steps
+
+For the first use or when updating dependency versions, you need to manually build `Clibgit2.xcframework`:
+
+```bash
+cd Scripts
+./build-libgit2-framework.sh
+```
+
+#### Build Process Description
+
+The script will automatically perform the following operations:
+
+1. Download dependency source code:
+   - OpenSSL 3.4.3
+   - libssh2 1.11.1
+   - libgit2 v1.9.2
+
+2. Compile static libraries for the following platforms:
+   - iOS (arm64)
+   - iOS Simulator (x86_64)
+   - macOS (arm64)
+   - macOS (x86_64)
+   - Mac Catalyst (arm64 + x86_64)
+
+3. Create `Sources/Clibgit2.xcframework` and copy module map
+
+#### Build Time
+
+The entire build process takes approximately **10-20 minutes**, depending on your network speed and CPU performance.
+
+#### System Requirements
+
+- macOS 14.0+
+- Xcode 15.0+
+- CMake (usually installed with Xcode)
+- wget (for downloading source code)
+
+If wget is not installed:
+```bash
+brew install wget
+```
+
+### After Building
+
+After successful build, the `Sources/Clibgit2.xcframework` file will be generated.
+
+You can then use Swift Package Manager normally:
+
+```bash
+# In LibGit2Swift directory
+swift build
+```
+
+Or in other projects:
+
+```bash
+cd /path/to/your/project
+swift build
+```
+
+### Daily Development
+
+Once `Clibgit2.xcframework` is built and committed to the repository, subsequent development doesn't require rebuilding unless:
+
+1. Need to update dependency versions (modify version numbers in `Scripts/build-libgit2-framework.sh`)
+2. Add new platform support
+3. Regenerate xcframework
+
+### Version Updates
+
+If you need to update dependency versions:
+
+1. Edit `Scripts/build-libgit2-framework.sh`
+2. Modify the following version numbers:
+   - `openssl-X.X.X`
+   - `libssh2-X.X.X`
+   - `vX.X.X` (libgit2)
+3. Re-run the build script
+
+### Troubleshooting
+
+#### Build Failed: wget not found
+
+```bash
+brew install wget
+```
+
+#### Build Failed: CMake Error
+
+Make sure Xcode command line tools are installed:
+```bash
+xcode-select --install
+```
+
+#### Package.swift Error: Clibgit2.xcframework not found
+
+Please run the build script first to generate the xcframework:
+```bash
+cd Scripts
+./build-libgit2-framework.sh
+```
+
+### Key Improvements
+
+Advantages compared to using external `static-libgit2` packages:
+
+1. ✅ **Latest libgit2** (v1.9.2 vs v1.3.0)
+2. ✅ **Independent maintenance**, no longer dependent on external packages
+3. ✅ **Better SSH support**, new libgit2 has better OpenSSH key format support
+4. ✅ **Full control**, can customize build options
+5. ✅ **Timely updates**, can update to latest versions anytime
+
+### Technical Details
+
+#### XCFramework Structure
+
+The generated xcframework contains the following platforms:
+- `ios-arm64` (iOS devices)
+- `ios-x86_64-simulator` (iOS simulator)
+- `macosx-arm64` (Apple Silicon Mac)
+- `macosx-x86_64` (Intel Mac)
+- `maccatalyst-arm64_x86_64` (Mac Catalyst universal)
+
+#### Linker Settings
+
+Package.swift configures the necessary linker settings:
+```swift
+linkerSettings: [
+    .linkedLibrary("z"),      // zlib (compression library)
+    .linkedLibrary("iconv")   // character encoding conversion library
+]
+```
+
+These libraries are built into macOS and don't require separate installation.
+
 ## Usage
 
 ### Initialize a Repository

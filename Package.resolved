@@ -8,15 +8,6 @@
         "branch" : "main",
         "revision" : "f3680135b72e6c2158d21fba5769f17ba77798e5"
       }
-    },
-    {
-      "identity" : "static-libgit2",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/bdewey/static-libgit2.git",
-      "state" : {
-        "revision" : "ca2b13cb2cd04365c9416803c1d7e26116b23efd",
-        "version" : "0.5.0"
-      }
     }
   ],
   "version" : 2

@@ -82,6 +82,150 @@ dependencies: [
 2. 输入仓库 URL：`https://github.com/nookery/LibGit2Swift.git`
 3. 选择版本规则
 
+## 构建
+
+### 依赖版本
+
+- **libgit2**: v1.9.2 (2025年12月)
+- **OpenSSL**: 3.4.3
+- **libssh2**: 1.11.1
+
+### 首次构建步骤
+
+在第一次使用或更新依赖版本后，需要手动构建 `Clibgit2.xcframework`：
+
+```bash
+cd Scripts
+./build-libgit2-framework.sh
+```
+
+#### 构建过程说明
+
+该脚本会自动完成以下操作：
+
+1. 下载依赖源代码：
+   - OpenSSL 3.4.3
+   - libssh2 1.11.1
+   - libgit2 v1.9.2
+
+2. 为以下平台编译静态库：
+   - iOS (arm64)
+   - iOS Simulator (x86_64)
+   - macOS (arm64)
+   - macOS (x86_64)
+   - Mac Catalyst (arm64 + x86_64)
+
+3. 创建 `Sources/Clibgit2.xcframework` 并复制 module map
+
+#### 构建时间
+
+整个构建过程大约需要 **10-20 分钟**，具体时间取决于你的网络速度和 CPU 性能。
+
+#### 系统要求
+
+- macOS 14.0+
+- Xcode 15.0+
+- CMake (通常会随 Xcode 安装)
+- wget (用于下载源代码)
+
+如果没有安装 wget：
+```bash
+brew install wget
+```
+
+### 构建完成后
+
+构建成功后，会生成 `Sources/Clibgit2.xcframework` 文件。
+
+然后就可以正常使用 Swift Package Manager：
+
+```bash
+# 在 LibGit2Swift 目录下
+swift build
+```
+
+或者在其他项目中：
+
+```bash
+cd /path/to/your/project
+swift build
+```
+
+### 日常开发
+
+一旦 `Clibgit2.xcframework` 构建完成并提交到仓库，后续开发无需再次构建，除非：
+
+1. 需要更新依赖版本（修改 `Scripts/build-libgit2-framework.sh` 中的版本号）
+2. 添加新的平台支持
+3. 重新生成 xcframework
+
+### 版本更新
+
+如果需要更新依赖版本：
+
+1. 编辑 `Scripts/build-libgit2-framework.sh`
+2. 修改以下版本号：
+   - `openssl-X.X.X`
+   - `libssh2-X.X.X`
+   - `vX.X.X` (libgit2)
+3. 重新运行构建脚本
+
+### 故障排除
+
+#### 构建失败：找不到 wget
+
+```bash
+brew install wget
+```
+
+#### 构建失败：CMake 错误
+
+确保安装了 Xcode 命令行工具：
+```bash
+xcode-select --install
+```
+
+#### Package.swift 错误：找不到 Clibgit2.xcframework
+
+请先运行构建脚本生成 xcframework：
+```bash
+cd Scripts
+./build-libgit2-framework.sh
+```
+
+### 主要改进
+
+相比使用外部 `static-libgit2` 包的优势：
+
+1. ✅ **使用最新 libgit2** (v1.9.2 vs v1.3.0)
+2. ✅ **独立维护**，不再依赖外部包
+3. ✅ **更好的 SSH 支持**，新版 libgit2 对 OpenSSH 密钥格式支持更好
+4. ✅ **完全控制**，可以自定义构建选项
+5. ✅ **更新及时**，可以随时更新到最新版本
+
+### 技术细节
+
+#### XCFramework 结构
+
+生成的 xcframework 包含以下平台：
+- `ios-arm64` (iOS 设备)
+- `ios-x86_64-simulator` (iOS 模拟器)
+- `macosx-arm64` (Apple Silicon Mac)
+- `macosx-x86_64` (Intel Mac)
+- `maccatalyst-arm64_x86_64` (Mac Catalyst universal)
+
+#### 链接设置
+
+Package.swift 中配置了必要的链接设置：
+```swift
+linkerSettings: [
+    .linkedLibrary("z"),      // zlib (压缩库)
+    .linkedLibrary("iconv")   // 字符编码转换库
+]
+```
+
+这两个库是 macOS 系统自带的，无需额外安装。
+
 ## 使用方法
 
 ### 初始化仓库
