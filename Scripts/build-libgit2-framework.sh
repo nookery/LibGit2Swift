@@ -1,6 +1,3 @@
-# This build file was copied & modified from https://github.com/light-tech/LibGit2-On-iOS
-# Updated to use latest versions: libgit2 v1.9.2, OpenSSL 3.4.3, libssh2 1.11.1
-
 # Get the script's directory and set REPO_ROOT to the parent (project root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_ROOT="$SCRIPT_DIR/.."
@@ -86,25 +83,33 @@ function setup_variables() {
             echo "Unsupported or missing platform! Must be one of" ${AVAILABLE_PLATFORMS[@]}
             exit 1;;
     esac
+
+    echo "✅ Build environment setup completed for platform: $PLATFORM (ARCH: $ARCH)"
 }
 
 ### Build libpcre for a given platform
 function build_libpcre() {
+    echo "📝 Building PCRE 8.45 for platform: $1"
     setup_variables $1 install
 
+    echo "📦 Downloading and setting up PCRE..."
     rm -rf pcre-8.45
     git clone https://github.com/light-tech/PCRE.git pcre-8.45
     cd pcre-8.45
 
+    echo "🔧 Configuring PCRE build..."
     rm -rf build && mkdir build && cd build
     CMAKE_ARGS+=(-DPCRE_BUILD_PCRECPP=NO \
         -DPCRE_BUILD_PCREGREP=NO \
         -DPCRE_BUILD_TESTS=NO \
         -DPCRE_SUPPORT_LIBBZ2=NO)
 
+    echo "⚙️  Running CMake for PCRE..."
     cmake "${CMAKE_ARGS[@]}" .. >/dev/null 2>/dev/null
 
+    echo "🔨 Building and installing PCRE..."
     cmake --build . --target install >/dev/null 2>/dev/null
+    echo "✅ PCRE build completed"
 }
 
 ### Build openssl for a given platform
@@ -141,27 +146,32 @@ function build_openssl() {
             echo "Unsupported or missing platform!";;
     esac
 
-    echo "$PLATFORM $ARCH $TARGET_OS"
-
+    echo "🔧 Configuring OpenSSL build for $TARGET_OS..."
     # See https://wiki.openssl.org/index.php/Compilation_and_Installation
     ./Configure --prefix=$REPO_ROOT/install-openssl/$PLATFORM \
         --openssldir=$REPO_ROOT/install-openssl/$PLATFORM \
         $TARGET_OS no-shared no-dso no-hw no-engine >/dev/null 2>/dev/null
 
+    echo "🔨 Building OpenSSL..."
     make >/dev/null 2>/dev/null
+    echo "📦 Installing OpenSSL..."
     make install_sw install_ssldirs >/dev/null 2>/dev/null
     export -n CFLAGS
+    echo "✅ OpenSSL build completed"
 }
 
 ### Build libssh2 for a given platform (assume openssl was built)
 function build_libssh2() {
+    echo "🔐 Building libssh2 1.11.1 for platform: $1"
     setup_variables $1 install-libssh2
 
+    echo "📦 Downloading and extracting libssh2..."
     rm -rf libssh2-1.11.1
     test -f libssh2-1.11.1.tar.gz || wget -q https://www.libssh2.org/download/libssh2-1.11.1.tar.gz
     tar xzf libssh2-1.11.1.tar.gz
     cd libssh2-1.11.1
 
+    echo "🔧 Configuring libssh2 build..."
     rm -rf build && mkdir build && cd build
 
     CMAKE_ARGS+=(-DCRYPTO_BACKEND=OpenSSL \
@@ -169,32 +179,40 @@ function build_libssh2() {
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_TESTING=OFF)
 
-    cmake "${CMAKE_ARGS[@]}" .. 
+    echo "⚙️  Running CMake for libssh2..."
+    cmake "${CMAKE_ARGS[@]}" ..
 
-    cmake --build . --target install 
+    echo "🔨 Building and installing libssh2..."
+    cmake --build . --target install
+    echo "✅ libssh2 build completed"
 }
 
 ### Build libgit2 for a single platform (given as the first and only argument)
 ### See @setup_variables for the list of available platform names
 ### Assume openssl and libssh2 was built
 function build_libgit2() {
+    echo "📚 Building libgit2 v1.9.2 for platform: $1"
     setup_variables $1 install
 
+    echo "📦 Downloading and extracting libgit2..."
     rm -rf libgit2-1.9.2
     test -f v1.9.2.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v1.9.2.zip
     ditto -x -k --sequesterRsrc --rsrc v1.9.2.zip ./
     cd libgit2-1.9.2
 
+    echo "🔧 Configuring libgit2 build..."
     rm -rf build && mkdir build && cd build
 
     # The CMake function that determines if `libssh2_userauth_publickey_frommemory` is defined doesn't
     # work when everything is statically linked. Manually override GIT_SSH_MEMORY_CREDENTIALS.
     CMAKE_ARGS+=(-DBUILD_CLAR=NO -DGIT_SSH_MEMORY_CREDENTIALS=1 -DCMAKE_PREFIX_PATH="$REPO_ROOT/install-libssh2/$PLATFORM;$REPO_ROOT/install-openssl/$PLATFORM")
 
-    echo "cmake ${CMAKE_ARGS[@]} .."
+    echo "⚙️  Running CMake for libgit2..."
     cmake "${CMAKE_ARGS[@]}" ..
 
+    echo "🔨 Building and installing libgit2..."
     cmake --build . --target install >/dev/null 2>/dev/null
+    echo "✅ libgit2 build completed"
 }
 
 ### Create xcframework for a given library
@@ -206,53 +224,71 @@ function build_xcframework() {
     local PLATFORMS=( iphoneos iphonesimulator )
     local FRAMEWORKS_ARGS=()
 
-    echo "Creating fat binary for macosx"
+    echo "📦 Creating XCFramework for $FWNAME..."
+
+    echo "🔧 Creating fat binary for macOS..."
     mkdir -p "$INSTALLDIR/macosx-fat/lib"
     lipo "$INSTALLDIR/macosx/lib/$FWNAME.a" "$INSTALLDIR/macosx-arm64/lib/$FWNAME.a" -create -output "$INSTALLDIR/macosx-fat/lib/$FWNAME.a"
     FRAMEWORKS_ARGS+=("-library" "$INSTALLDIR/macosx-fat/lib/$FWNAME.a" "-headers" "$INSTALLDIR/macosx/include")
 
-    echo "Creating fat binary for maccatalyst"
+    echo "🔧 Creating fat binary for Mac Catalyst..."
     mkdir -p "$INSTALLDIR/maccatalyst-fat/lib"
     lipo "$INSTALLDIR/maccatalyst/lib/$FWNAME.a" "$INSTALLDIR/maccatalyst-arm64/lib/$FWNAME.a" -create -output "$INSTALLDIR/maccatalyst-fat/lib/$FWNAME.a"
     FRAMEWORKS_ARGS+=("-library" "$INSTALLDIR/maccatalyst-fat/lib/$FWNAME.a" "-headers" "$INSTALLDIR/maccatalyst/include")
 
-    echo "Building" $FWNAME "XCFramework containing" ${PLATFORMS[@]}
+    echo "🏗️  Building $FWNAME XCFramework containing" ${PLATFORMS[@]}
 
     for p in ${PLATFORMS[@]}; do
         FRAMEWORKS_ARGS+=("-library" "$INSTALLDIR/$p/lib/$FWNAME.a" "-headers" "$INSTALLDIR/$p/include")
     done
 
     cd $REPO_ROOT
+    echo "📦 Creating XCFramework at Sources/$XCFRAMEWORKNAME.xcframework..."
     xcodebuild -create-xcframework ${FRAMEWORKS_ARGS[@]} -output Sources/$XCFRAMEWORKNAME.xcframework
+    echo "✅ XCFramework creation completed"
 }
 
 ### Copy module.modulemap to libgit2.xcframework/*/Headers
 ### so that we can use libgit2 C API in Swift
 function copy_modulemap() {
+    echo "📋 Copying module map to XCFramework..."
     local FWDIRS=$(find Sources/Clibgit2.xcframework -mindepth 1 -maxdepth 1 -type d)
     for d in ${FWDIRS[@]}; do
-        echo "Copying module map to: $d"
+        echo "📋 Copying module map to: $d"
         cp $REPO_ROOT/Scripts/Clibgit2_modulemap $d/Headers/module.modulemap
     done
+    echo "✅ Module map copying completed"
 }
 
 ### Build libgit2 and Clibgit2 frameworks for all available platforms
 
+echo "🏗️  Starting build process for platforms: ${AVAILABLE_PLATFORMS[@]}"
+
 for p in ${AVAILABLE_PLATFORMS[@]}; do
-    echo "Build libraries for $p"
-    
+    echo ""
+    echo "🚀 Building libraries for platform: $p"
+    echo "========================================"
+
     # build_libpcre $p
     build_openssl $p
     build_libssh2 $p
     build_libgit2 $p
 
     # Put all of the generated *.a files into a single *.a file that will be in our framework
+    echo "🔗 Combining static libraries for $p..."
     cd $REPO_ROOT
     libtool -v -static -o libgit2_all.a install-openssl/$p/lib/*.a install/$p/lib/*.a install-libssh2/$p/lib/*.a
     cp libgit2_all.a install/$p/lib
     rm libgit2_all.a
+    echo "✅ Library combination completed for $p"
 done
 
+echo ""
+echo "🎯 Creating final XCFramework..."
 build_xcframework libgit2_all install Clibgit2
 cd $REPO_ROOT
 copy_modulemap
+
+echo ""
+echo "🎉 Build process completed successfully!"
+echo "📁 XCFramework available at: Sources/Clibgit2.xcframework"
