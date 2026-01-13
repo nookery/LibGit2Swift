@@ -2,63 +2,6 @@
 
 A type-safe Swift wrapper around [libgit2](https://libgit2.org/), providing a native Swift interface for Git operations without relying on shell commands.
 
-## Overview
-
-LibGit2Swift is a Swift library that wraps the libgit2 C library, offering a clean, Swifty API for programmatic Git operations. It's designed for applications that need to interact with Git repositories directly, such as IDEs, version control clients, or developer tools.
-
-## Features
-
-### Repository Management
-- Create new Git repositories
-- Check if a path is a Git repository
-- Get repository root directory
-- Get HEAD reference and current branch
-- Check if HEAD is detached
-- Get repository status and path information
-
-### Configuration Management
-- Get and set Git configuration values
-- Manage user configuration (name, email)
-- Handle both repository-specific and global configuration
-
-### Branch Operations
-- List local and remote branches
-- Create, delete, and rename branches
-- Get current branch information
-- Manage branch upstream relationships
-
-### Commit Operations
-- Get commit history with pagination support
-- Create new commits
-- Amend existing commits
-- Add files and commit in one operation
-- Get detailed commit information including references and tags
-
-### File Operations
-- Add files to staging area (single files or all changes)
-- Checkout files, branches, or specific commits
-- Check for uncommitted changes
-- Get file status and diff information
-
-### Remote Management
-- List remote repositories
-- Add, remove, and configure remotes
-- Get and set remote URLs
-- Rename remotes
-
-### Diff Operations
-- Get diff between working tree and index
-- Get diff between index and HEAD
-- Compare commits and show changes
-- Get file content from specific commits
-
-### Additional Features
-- Tag operations (create, list, delete)
-- Reset operations (soft, mixed, hard)
-- Merge operations
-- Stash operations
-- Network operations (fetch, pull, push)
-
 ## Requirements
 
 - macOS 14.0 or later
@@ -78,6 +21,7 @@ dependencies: [
 ```
 
 Or add it via Xcode:
+
 1. File → Add Package Dependencies
 2. Enter the repository URL: `https://github.com/nookery/LibGit2Swift.git`
 3. Select the version rule
@@ -86,7 +30,7 @@ Or add it via Xcode:
 
 ### Dependency Versions
 
-- **libgit2**: v1.9.2 (December 2025)
+- **libgit2**: v1.9.2
 - **OpenSSL**: 3.4.3
 - **libssh2**: 1.11.1
 
@@ -117,11 +61,7 @@ The script will automatically perform the following operations:
 
 3. Create `Sources/Clibgit2.xcframework` and copy module map
 
-#### Build Time
-
-The entire build process takes approximately **10-20 minutes**, depending on your network speed and CPU performance.
-
-#### System Requirements
+#### Build-time System Requirements
 
 - macOS 14.0+
 - Xcode 15.0+
@@ -129,6 +69,7 @@ The entire build process takes approximately **10-20 minutes**, depending on you
 - wget (for downloading source code)
 
 If wget is not installed:
+
 ```bash
 brew install wget
 ```
@@ -169,62 +110,6 @@ If you need to update dependency versions:
    - `libssh2-X.X.X`
    - `vX.X.X` (libgit2)
 3. Re-run the build script
-
-### Troubleshooting
-
-#### Build Failed: wget not found
-
-```bash
-brew install wget
-```
-
-#### Build Failed: CMake Error
-
-Make sure Xcode command line tools are installed:
-```bash
-xcode-select --install
-```
-
-#### Package.swift Error: Clibgit2.xcframework not found
-
-Please run the build script first to generate the xcframework:
-```bash
-cd Scripts
-./build-libgit2-framework.sh
-```
-
-### Key Improvements
-
-Advantages compared to using external `static-libgit2` packages:
-
-1. ✅ **Latest libgit2** (v1.9.2 vs v1.3.0)
-2. ✅ **Independent maintenance**, no longer dependent on external packages
-3. ✅ **Better SSH support**, new libgit2 has better OpenSSH key format support
-4. ✅ **Full control**, can customize build options
-5. ✅ **Timely updates**, can update to latest versions anytime
-
-### Technical Details
-
-#### XCFramework Structure
-
-The generated xcframework contains the following platforms:
-- `ios-arm64` (iOS devices)
-- `ios-x86_64-simulator` (iOS simulator)
-- `macosx-arm64` (Apple Silicon Mac)
-- `macosx-x86_64` (Intel Mac)
-- `maccatalyst-arm64_x86_64` (Mac Catalyst universal)
-
-#### Linker Settings
-
-Package.swift configures the necessary linker settings:
-```swift
-linkerSettings: [
-    .linkedLibrary("z"),      // zlib (compression library)
-    .linkedLibrary("iconv")   // character encoding conversion library
-]
-```
-
-These libraries are built into macOS and don't require separate installation.
 
 ## Usage
 
@@ -349,41 +234,6 @@ do {
     print("Error: \(error.localizedDescription)")
 }
 ```
-
-## Project Structure
-
-```
-Sources/LibGit2Swift/
-├── LibGit2Swift.swift       # Public API entry point
-├── LibGit2Wrapper.swift      # Core wrapper with configuration
-├── LibGit2Models.swift       # Data models (GitBranch, GitCommit, etc.)
-├── Repository.swift         # Repository operations
-├── Branch.swift             # Branch management
-├── Commit.swift              # Commit history and details
-├── Commit+Write.swift        # Commit creation and modification
-├── Add.swift                 # File staging operations
-├── Status.swift             # Status checking
-├── Checkout.swift           # Branch and file checkout
-├── Remote.swift              # Remote repository management
-├── Diff.swift                # Diff operations
-├── Tag.swift                 # Tag operations
-├── Reset.swift               # Reset operations
-├── Merge.swift               # Merge operations
-├── Stash.swift               # Stash operations
-└── Network.swift             # Network operations
-```
-
-## Design Principles
-
-1. **Type Safety**: Swift enums and structs provide compile-time safety
-2. **Automatic Memory Management**: Proper cleanup of C library resources
-3. **Swift Native API**: Swift-friendly design patterns and conventions
-4. **Comprehensive Error Handling**: Meaningful error messages and recovery suggestions
-5. **Modular Structure**: Each Git operation has its own Swift file for organization
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
