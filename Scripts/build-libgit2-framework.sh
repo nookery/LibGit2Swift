@@ -18,8 +18,7 @@ rm -rf $REPO_ROOT/install*
 mkdir $REPO_ROOT/install
 echo "✅ Cleanup completed"
 
-# AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 macosx-arm64 macosx)
-AVAILABLE_PLATFORMS=(macosx-arm64)
+AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 macosx-arm64 macosx)
 
 ### Setup common environment variables to run CMake for a given platform
 ### Usage:      setup_variables PLATFORM INSTALLDIR
@@ -44,7 +43,7 @@ function setup_variables() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER_WORKS=ON \
         -DCMAKE_CXX_COMPILER_WORKS=ON \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=12.4 \
         -DCMAKE_INSTALL_PREFIX=$REPO_ROOT/$2/$PLATFORM)
 
     case $PLATFORM in
@@ -114,25 +113,25 @@ function build_libpcre() {
 
 ### Build openssl for a given platform
 function build_openssl() {
-    echo "🔐 Building OpenSSL 3.4.3 for platform: $1"
+    echo "🔐 Building OpenSSL 3.0.0 for platform: $1"
     setup_variables $1 install-openssl
 
     # It is better to remove and redownload the source since building make the source code directory dirty!
     echo "📦 Downloading and extracting OpenSSL..."
-    rm -rf openssl-3.4.3
-    test -f openssl-3.4.3.tar.gz || wget -q https://www.openssl.org/source/openssl-3.4.3.tar.gz
-    tar xzf openssl-3.4.3.tar.gz
-    cd openssl-3.4.3
+    rm -rf openssl-3.0.0
+    test -f openssl-3.0.0.tar.gz || wget -q https://www.openssl.org/source/openssl-3.0.0.tar.gz
+    tar xzf openssl-3.0.0.tar.gz
+    cd openssl-3.0.0
     echo "📦 OpenSSL source ready"
 
     case $PLATFORM in
         "iphoneos")
             TARGET_OS=ios64-cross
-            export CFLAGS="-isysroot $SYSROOT -arch $ARCH -mios-version-min=14.0";;
+            export CFLAGS="-isysroot $SYSROOT -arch $ARCH -mios-version-min=13.0";;
 
         "iphonesimulator")
             TARGET_OS=iossimulator-xcrun
-            export CFLAGS="-isysroot $SYSROOT -miphonesimulator-version-min=14.0";;
+            export CFLAGS="-isysroot $SYSROOT -miphonesimulator-version-min=13.0";;
 
         "maccatalyst"|"maccatalyst-arm64")
             TARGET_OS=darwin64-$ARCH-cc
@@ -162,14 +161,14 @@ function build_openssl() {
 
 ### Build libssh2 for a given platform (assume openssl was built)
 function build_libssh2() {
-    echo "🔐 Building libssh2 1.11.1 for platform: $1"
+    echo "🔐 Building libssh2 1.10.0 for platform: $1"
     setup_variables $1 install-libssh2
 
     echo "📦 Downloading and extracting libssh2..."
-    rm -rf libssh2-1.11.1
-    test -f libssh2-1.11.1.tar.gz || wget -q https://www.libssh2.org/download/libssh2-1.11.1.tar.gz
-    tar xzf libssh2-1.11.1.tar.gz
-    cd libssh2-1.11.1
+    rm -rf libssh2-1.10.0
+    test -f libssh2-1.10.0.tar.gz || wget -q https://www.libssh2.org/download/libssh2-1.10.0.tar.gz
+    tar xzf libssh2-1.10.0.tar.gz
+    cd libssh2-1.10.0
 
     echo "🔧 Configuring libssh2 build..."
     rm -rf build && mkdir build && cd build
@@ -191,14 +190,14 @@ function build_libssh2() {
 ### See @setup_variables for the list of available platform names
 ### Assume openssl and libssh2 was built
 function build_libgit2() {
-    echo "📚 Building libgit2 v1.9.2 for platform: $1"
+    echo "📚 Building libgit2 v1.3.0 for platform: $1"
     setup_variables $1 install
 
     echo "📦 Downloading and extracting libgit2..."
-    rm -rf libgit2-1.9.2
-    test -f v1.9.2.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v1.9.2.zip
-    ditto -x -k --sequesterRsrc --rsrc v1.9.2.zip ./
-    cd libgit2-1.9.2
+    rm -rf libgit2-1.3.0
+    test -f v1.3.0.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v1.3.0.zip
+    ditto -x -k --sequesterRsrc --rsrc v1.3.0.zip ./
+    cd libgit2-1.3.0
 
     echo "🔧 Configuring libgit2 build..."
     rm -rf build && mkdir build && cd build
@@ -221,7 +220,7 @@ function build_xcframework() {
     local INSTALLDIR=$2
     local XCFRAMEWORKNAME=$3
     shift 3
-    local PLATFORMS=( iphoneos iphonesimulator )
+    local PLATFORMS=( "${AVAILABLE_PLATFORMS[@]}" )
     local FRAMEWORKS_ARGS=()
 
     echo "📦 Creating XCFramework for $FWNAME..."
