@@ -130,11 +130,10 @@ iOSInjectionProject/
 *.log
 
 # LibGit2Swift build artifacts
+temp/
 dependencies/
 install/
 *.tar.gz
 *.zip
 install*
-dependencies
 .swiftpm
-.DS_Store

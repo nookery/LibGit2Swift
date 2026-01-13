@@ -1,21 +1,19 @@
 # Get the script's directory and set REPO_ROOT to the parent (project root)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_ROOT="$SCRIPT_DIR/.."
-export DEPENDENCIES_ROOT="$REPO_ROOT/dependencies"
+export TEMP_DIR="$REPO_ROOT/temp"
 
 set -e
 
 echo "🚀 Starting LibGit2 framework build script..."
 echo "📁 Script directory: $SCRIPT_DIR"
 echo "📁 Repository root: $REPO_ROOT"
-echo "📁 Dependencies root: $DEPENDENCIES_ROOT"
+echo "📁 Temp directory: $TEMP_DIR"
 
 echo "🧹 Cleaning up previous build artifacts..."
-rm -rf $DEPENDENCIES_ROOT
-mkdir $DEPENDENCIES_ROOT
+rm -rf $TEMP_DIR
+mkdir -p $TEMP_DIR
 rm -rf $REPO_ROOT/Sources/Clibgit2.xcframework
-rm -rf $REPO_ROOT/install*
-mkdir $REPO_ROOT/install
 echo "✅ Cleanup completed"
 
 AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 macosx-arm64 macosx)
@@ -35,7 +33,7 @@ AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 maco
 ###    $CMAKE_ARGS
 ### providing basic/common CMake options will be set.
 function setup_variables() {
-    cd $DEPENDENCIES_ROOT
+    cd $TEMP_DIR
     PLATFORM=$1
 
     echo "⚙️  Setting up build environment for platform: $PLATFORM"
@@ -44,7 +42,7 @@ function setup_variables() {
         -DCMAKE_C_COMPILER_WORKS=ON \
         -DCMAKE_CXX_COMPILER_WORKS=ON \
         -DCMAKE_OSX_DEPLOYMENT_TARGET=12.4 \
-        -DCMAKE_INSTALL_PREFIX=$REPO_ROOT/$2/$PLATFORM)
+        -DCMAKE_INSTALL_PREFIX=$TEMP_DIR/$2/$PLATFORM)
 
     case $PLATFORM in
         "iphoneos")
@@ -113,15 +111,16 @@ function build_libpcre() {
 
 ### Build openssl for a given platform
 function build_openssl() {
-    echo "🔐 Building OpenSSL 3.0.0 for platform: $1"
+    version="3.0.0"
+    echo "🔐 Building OpenSSL $version for platform: $1"
     setup_variables $1 install-openssl
 
     # It is better to remove and redownload the source since building make the source code directory dirty!
     echo "📦 Downloading and extracting OpenSSL..."
-    rm -rf openssl-3.0.0
-    test -f openssl-3.0.0.tar.gz || wget -q https://www.openssl.org/source/openssl-3.0.0.tar.gz
-    tar xzf openssl-3.0.0.tar.gz
-    cd openssl-3.0.0
+    rm -rf openssl-$version
+    test -f openssl-$version.tar.gz || wget -q https://www.openssl.org/source/openssl-$version.tar.gz
+    tar xzf openssl-$version.tar.gz
+    cd openssl-$version
     echo "📦 OpenSSL source ready"
 
     case $PLATFORM in
@@ -147,8 +146,8 @@ function build_openssl() {
 
     echo "🔧 Configuring OpenSSL build for $TARGET_OS..."
     # See https://wiki.openssl.org/index.php/Compilation_and_Installation
-    ./Configure --prefix=$REPO_ROOT/install-openssl/$PLATFORM \
-        --openssldir=$REPO_ROOT/install-openssl/$PLATFORM \
+    ./Configure --prefix=$TEMP_DIR/install-openssl/$PLATFORM \
+        --openssldir=$TEMP_DIR/install-openssl/$PLATFORM \
         $TARGET_OS no-shared no-dso no-hw no-engine >/dev/null 2>/dev/null
 
     echo "🔨 Building OpenSSL..."
@@ -161,20 +160,21 @@ function build_openssl() {
 
 ### Build libssh2 for a given platform (assume openssl was built)
 function build_libssh2() {
-    echo "🔐 Building libssh2 1.10.0 for platform: $1"
+    version="1.10.0"
+    echo "🔐 Building libssh2 $version for platform: $1"
     setup_variables $1 install-libssh2
 
     echo "📦 Downloading and extracting libssh2..."
-    rm -rf libssh2-1.10.0
-    test -f libssh2-1.10.0.tar.gz || wget -q https://www.libssh2.org/download/libssh2-1.10.0.tar.gz
-    tar xzf libssh2-1.10.0.tar.gz
-    cd libssh2-1.10.0
+    rm -rf libssh2-$version
+    test -f libssh2-$version.tar.gz || wget -q https://www.libssh2.org/download/libssh2-$version.tar.gz
+    tar xzf libssh2-$version.tar.gz
+    cd libssh2-$version
 
     echo "🔧 Configuring libssh2 build..."
     rm -rf build && mkdir build && cd build
 
     CMAKE_ARGS+=(-DCRYPTO_BACKEND=OpenSSL \
-        -DOPENSSL_ROOT_DIR=$REPO_ROOT/install-openssl/$PLATFORM \
+        -DOPENSSL_ROOT_DIR=$TEMP_DIR/install-openssl/$PLATFORM \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_TESTING=OFF)
 
@@ -190,21 +190,22 @@ function build_libssh2() {
 ### See @setup_variables for the list of available platform names
 ### Assume openssl and libssh2 was built
 function build_libgit2() {
-    echo "📚 Building libgit2 v1.3.0 for platform: $1"
+    version="1.3.0"
+    echo "📚 Building libgit2 v$version for platform: $1"
     setup_variables $1 install
 
     echo "📦 Downloading and extracting libgit2..."
-    rm -rf libgit2-1.3.0
-    test -f v1.3.0.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v1.3.0.zip
-    ditto -x -k --sequesterRsrc --rsrc v1.3.0.zip ./
-    cd libgit2-1.3.0
+    rm -rf libgit2-$version
+    test -f v$version.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v$version.zip
+    ditto -x -k --sequesterRsrc --rsrc v$version.zip ./
+    cd libgit2-$version
 
     echo "🔧 Configuring libgit2 build..."
     rm -rf build && mkdir build && cd build
 
     # The CMake function that determines if `libssh2_userauth_publickey_frommemory` is defined doesn't
     # work when everything is statically linked. Manually override GIT_SSH_MEMORY_CREDENTIALS.
-    CMAKE_ARGS+=(-DBUILD_CLAR=NO -DGIT_SSH_MEMORY_CREDENTIALS=1 -DCMAKE_PREFIX_PATH="$REPO_ROOT/install-libssh2/$PLATFORM;$REPO_ROOT/install-openssl/$PLATFORM")
+    CMAKE_ARGS+=(-DBUILD_CLAR=NO -DGIT_SSH_MEMORY_CREDENTIALS=1 -DCMAKE_PREFIX_PATH="$TEMP_DIR/install-libssh2/$PLATFORM;$TEMP_DIR/install-openssl/$PLATFORM")
 
     echo "⚙️  Running CMake for libgit2..."
     cmake "${CMAKE_ARGS[@]}" ..
@@ -291,18 +292,19 @@ for p in ${AVAILABLE_PLATFORMS[@]}; do
     # Put all of the generated *.a files into a single *.a file that will be in our framework
     echo "🔗 Combining static libraries for $p..."
     cd $REPO_ROOT
-    libtool -v -static -o libgit2_all.a install-openssl/$p/lib/*.a install/$p/lib/*.a install-libssh2/$p/lib/*.a
-    cp libgit2_all.a install/$p/lib
+    libtool -v -static -o libgit2_all.a temp/install-openssl/$p/lib/*.a temp/install/$p/lib/*.a temp/install-libssh2/$p/lib/*.a
+    cp libgit2_all.a temp/install/$p/lib
     rm libgit2_all.a
     echo "✅ Library combination completed for $p"
 done
 
 echo ""
 echo "🎯 Creating final XCFramework..."
-build_xcframework libgit2_all install Clibgit2
+build_xcframework libgit2_all temp/install Clibgit2
 cd $REPO_ROOT
 copy_modulemap
 
 echo ""
 echo "🎉 Build process completed successfully!"
 echo "📁 XCFramework available at: Sources/Clibgit2.xcframework"
+echo "📁 Temp files are in: $TEMP_DIR (can be deleted after verification)"
