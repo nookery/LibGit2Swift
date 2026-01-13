@@ -15,9 +15,9 @@ extension LibGit2 {
 
         var statusOpts = git_status_options()
         git_status_init_options(&statusOpts, UInt32(GIT_STATUS_OPTIONS_VERSION))
-        statusOpts.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue |
-                          GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue |
+        statusOpts.flags = GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue |
                           GIT_STATUS_OPT_RECURSE_IGNORED_DIRS.rawValue
+        // 注意：不包含 GIT_STATUS_OPT_INCLUDE_UNTRACKED，所以未跟踪文件不会被计算在内
 
         var statusList: OpaquePointer? = nil
         defer { if statusList != nil { git_status_list_free(statusList) } }
