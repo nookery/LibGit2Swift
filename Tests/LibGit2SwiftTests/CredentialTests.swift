@@ -3,6 +3,7 @@ import Clibgit2
 @testable import LibGit2Swift
 import XCTest
 import Security
+import OSLog
 
 /// Credential 相关功能的测试
 final class CredentialTests: LibGit2SwiftTestCase {
@@ -238,7 +239,7 @@ extension CredentialTests {
                     let isValidPermission = (posixPermissions == 0o600) || (posixPermissions == 0o400)
 
                     if !isValidPermission {
-                        print("⚠️ Warning: SSH key \(keyName) has permissions \(String(format: "%o", posixPermissions)), should be 600 or 400")
+                        os_log("⚠️ Warning: SSH key \(keyName) has permissions \(String(format: "%o", posixPermissions)), should be 600 or 400")
                     }
 
                     // 这不是一个硬性断言，因为某些系统配置可能不同
@@ -256,10 +257,10 @@ extension CredentialTests {
 
         // 至少找到一个密钥文件（对于非 CI 环境）
         if foundKeys.isEmpty {
-            print("ℹ️ No SSH keys found in ~/.ssh directory")
+            os_log("ℹ️ No SSH keys found in ~/.ssh directory")
             throw XCTSkip("No SSH keys found for testing")
         } else {
-            print("✅ Found SSH key types: \(foundKeys.joined(separator: ", "))")
+            os_log("✅ Found SSH key types: \(foundKeys.joined(separator: ", "))")
         }
     }
 
@@ -307,7 +308,7 @@ extension CredentialTests {
         // 应该成功创建凭据
         XCTAssertEqual(result, 0, "Should successfully create HTTPS credential")
 
-        print("✅ HTTPS credential callback test passed")
+        os_log("✅ HTTPS credential callback test passed")
     }
 
     /// 测试 SSH 凭据回调（SSH 密钥认证）
@@ -359,14 +360,14 @@ extension CredentialTests {
             // 因为可能存在权限问题、密钥格式问题等
             // 所以我们只验证回调不会崩溃，返回值可以是成功或失败
             if result == 0 {
-                print("✅ SSH credential callback test passed (with existing keys, credential created successfully)")
+                os_log("✅ SSH credential callback test passed (with existing keys, credential created successfully)")
             } else {
-                print("ℹ️ SSH credential callback returned error code \(result), but this is acceptable (key may have permissions/format issues)")
+                os_log("ℹ️ SSH credential callback returned error code \(result), but this is acceptable (key may have permissions/format issues)")
             }
             // 不再强制要求 result == 0
         } else {
             XCTAssertEqual(result, Int32(GIT_EUSER.rawValue), "Should fail without SSH keys")
-            print("ℹ️ SSH credential callback test passed (no keys available, as expected)")
+            os_log("ℹ️ SSH credential callback test passed (no keys available, as expected)")
         }
     }
 
@@ -399,7 +400,7 @@ extension CredentialTests {
         // 应该返回错误
         XCTAssertNotEqual(result, 0, "SSH memory credential is not supported in current implementation")
 
-        print("✅ SSH memory credential callback test passed (not supported, as expected)")
+        os_log("✅ SSH memory credential callback test passed (not supported, as expected)")
     }
 
     /// 测试凭据回调在没有凭据时的行为
@@ -430,7 +431,7 @@ extension CredentialTests {
         // 应该返回错误（没有找到凭据）
         XCTAssertEqual(result, Int32(GIT_EUSER.rawValue), "Should return GIT_EUSER when no credential found")
 
-        print("✅ Credential callback test passed (no credentials, as expected)")
+        os_log("✅ Credential callback test passed (no credentials, as expected)")
     }
 
     /// 测试 SSH URL 格式
@@ -455,7 +456,7 @@ extension CredentialTests {
             }
         }
 
-        print("✅ SSH URL format test passed")
+        os_log("✅ SSH URL format test passed")
     }
 
     /// 测试 URL 协议检测
@@ -484,9 +485,9 @@ extension CredentialTests {
         // 这是 SSH 特有的格式，需要特殊处理
         let sshParsed = URL(string: sshURL)
         // 标准的 URL 解析器可能无法解析这种格式，这是正常的
-        print("ℹ️ SCP-like SSH URL '\(sshURL)' parsing result: \(sshParsed != nil ? "parsed" : "not parsed (expected)")")
+        os_log("ℹ️ SCP-like SSH URL '\(sshURL)' parsing result: \(sshParsed != nil ? "parsed" : "not parsed (expected)")")
 
-        print("✅ URL protocol detection test passed")
+        os_log("✅ URL protocol detection test passed")
     }
 
     /// 测试 SSH URL 提取用户名和主机
@@ -524,6 +525,6 @@ extension CredentialTests {
             }
         }
 
-        print("✅ SSH URL component parsing test passed")
+        os_log("✅ SSH URL component parsing test passed")
     }
 }

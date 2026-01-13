@@ -32,9 +32,9 @@ extension LibGit2 {
 
         do {
             try "ref: \(branchRef)\n".write(toFile: headPath, atomically: true, encoding: .utf8)
-            print("🐚 LibGit2: Directly wrote HEAD file: ref: \(branchRef)")
+            os_log("🐚 LibGit2: Directly wrote HEAD file: ref: \(branchRef)")
         } catch {
-            print("⚠️ LibGit2: Failed to write HEAD file: \(error)")
+            os_log("⚠️ LibGit2: Failed to write HEAD file: \(error)")
             throw LibGit2Error.checkoutFailed(branch)
         }
 
@@ -46,7 +46,7 @@ extension LibGit2 {
 
         let checkoutResult = git_checkout_head(repo, &checkoutOpts)
         if checkoutResult != 0 {
-            print("⚠️ LibGit2: Checkout failed (error: \(checkoutResult))")
+            os_log("⚠️ LibGit2: Checkout failed (error: \(checkoutResult))")
             throw LibGit2Error.checkoutFailed(branch)
         }
 

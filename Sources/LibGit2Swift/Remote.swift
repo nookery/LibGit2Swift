@@ -6,9 +6,11 @@ import OSLog
 /// LibGit2 远程仓库操作扩展
 extension LibGit2 {
     /// 获取未推送的提交（本地领先远程的提交）
-    /// - Parameter path: 仓库路径
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志
     /// - Returns: 未推送的提交列表
-    public static func getUnPushedCommits(at path: String) throws -> [GitCommit] {
+    public static func getUnPushedCommits(at path: String, verbose: Bool) throws -> [GitCommit] {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
@@ -18,7 +20,7 @@ extension LibGit2 {
 
         guard headResult == 0 else {
             // 无法获取 HEAD，返回空数组
-            os_log(.debug, "getUnPushedCommits: Cannot get HEAD")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: Cannot get HEAD") }
             return []
         }
 
@@ -27,7 +29,7 @@ extension LibGit2 {
         let lookupResult = git_reference_lookup(&headRef, repo, "HEAD")
 
         guard lookupResult == 0, let ref = headRef else {
-            os_log(.debug, "getUnPushedCommits: Cannot lookup HEAD reference")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: Cannot lookup HEAD reference") }
             return []
         }
         defer { git_reference_free(headRef) }
@@ -37,7 +39,7 @@ extension LibGit2 {
         let resolveResult = git_reference_resolve(&targetRef, ref)
 
         guard resolveResult == 0, let branchRef = targetRef else {
-            os_log(.debug, "getUnPushedCommits: Cannot resolve HEAD reference")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: Cannot resolve HEAD reference") }
             return []
         }
         defer { git_reference_free(targetRef) }
@@ -48,7 +50,7 @@ extension LibGit2 {
 
         guard branchResult == 0, let upstream = upstreamRef else {
             // 没有上游分支，返回空数组
-            os_log(.debug, "getUnPushedCommits: No upstream branch configured")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: No upstream branch configured") }
             return []
         }
         defer { git_reference_free(upstreamRef) }
@@ -57,22 +59,22 @@ extension LibGit2 {
         // git_branch_upstream 返回的是 merge target，我们需要构建实际的远程跟踪分支引用
         let upstreamName = git_reference_shorthand(upstream)
         guard let namePtr = upstreamName else {
-            os_log(.debug, "getUnPushedCommits: Cannot get upstream branch name")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: Cannot get upstream branch name") }
             return []
         }
         let upstreamBranchName = String(cString: namePtr)
 
-        #if DEBUG
-        print("🔍 getUnPushedCommits: Configured upstream: \(upstreamBranchName)")
-        #endif
+        if verbose {
+            os_log("\(Self.t)getUnPushedCommits: Configured upstream: \(upstreamBranchName)")
+        }
 
         // 构建远程跟踪分支的全名（refs/remotes/origin/main）
         // upstreamBranchName 格式为 "origin/main"，我们需要转换为 "refs/remotes/origin/main"
         let remoteTrackingBranchName = "refs/remotes/\(upstreamBranchName)"
 
-        #if DEBUG
-        print("🔍 getUnPushedCommits: Looking for remote tracking branch: \(remoteTrackingBranchName)")
-        #endif
+        if verbose {
+            os_log("\(Self.t)getUnPushedCommits: Looking for remote tracking branch: \(remoteTrackingBranchName)")
+        }
 
         // 获取远程跟踪分支的 HEAD OID
         var upstreamOID = git_oid()
@@ -84,19 +86,18 @@ extension LibGit2 {
 
         guard upstreamResult == 0 else {
             // 无法获取上游 HEAD，返回空数组
-            os_log(.debug, "getUnPushedCommits: Cannot get upstream HEAD OID for \(remoteTrackingBranchName)")
-            #if DEBUG
-            print("❌ getUnPushedCommits: Cannot get upstream HEAD OID for \(remoteTrackingBranchName)")
-            #endif
+            if verbose {
+                os_log("\(Self.t)getUnPushedCommits: Cannot get upstream HEAD OID for \(remoteTrackingBranchName)")
+            }
             return []
         }
 
-        #if DEBUG
-        let upstreamOIDStr = oidToString(upstreamOID)
-        let headOIDStr = oidToString(headOID)
-        print("🔍 getUnPushedCommits: HEAD OID: \(headOIDStr)")
-        print("🔍 getUnPushedCommits: Remote tracking OID: \(upstreamOIDStr)")
-        #endif
+        if verbose {
+            let upstreamOIDStr = oidToString(upstreamOID)
+            let headOIDStr = oidToString(headOID)
+            os_log("\(Self.t)getUnPushedCommits: HEAD OID: \(headOIDStr)")
+            os_log("\(Self.t)getUnPushedCommits: Remote tracking OID: \(upstreamOIDStr)")
+        }
 
         // 比较本地和远程，获取领先/落后数量
         var ahead: Int = 0
@@ -104,15 +105,13 @@ extension LibGit2 {
         let graphResult = git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &upstreamOID)
 
         guard graphResult == 0 else {
-            os_log(.debug, "getUnPushedCommits: Cannot compare graphs")
+            if verbose { os_log("\(Self.t)getUnPushedCommits: Cannot compare graphs") }
             return []
         }
 
-        #if DEBUG
-        print("🔍 getUnPushedCommits: ahead=\(ahead), behind=\(behind)")
-        #endif
-
-        os_log(.debug, "getUnPushedCommits: ahead=\(ahead), behind=\(behind)")
+        if verbose {
+            os_log("\(Self.t)getUnPushedCommits: ahead=\(ahead), behind=\(behind)")
+        }
 
         // 如果没有领先的提交，返回空数组
         guard ahead > 0 else {

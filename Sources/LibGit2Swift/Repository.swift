@@ -129,7 +129,7 @@ extension LibGit2 {
                 let targetName = String(cString: targetPtr)
                 // "refs/heads/main" -> "main"
                 let branchName = targetName.replacingOccurrences(of: "refs/heads/", with: "")
-                print("🐚 LibGit2: HEAD is symbolic ref to branch: \(branchName)")
+                os_log("🐚 LibGit2: HEAD is symbolic ref to branch: \(branchName)")
                 return branchName
             }
         }
@@ -139,7 +139,7 @@ extension LibGit2 {
             let oid = git_reference_target(headPtr)
             if let oidPtr = oid {
                 let hash = oidToString(oidPtr.pointee)
-                print("🐚 LibGit2: HEAD is detached at commit: \(hash)")
+                os_log("🐚 LibGit2: HEAD is detached at commit: \(hash)")
                 return hash
             }
         }

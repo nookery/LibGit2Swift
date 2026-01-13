@@ -639,7 +639,7 @@ final class RemoteTests: LibGit2SwiftTestCase {
         }
 
         // 获取未推送的提交
-        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath, verbose: true)
 
         // 应该有3个未推送的提交
         XCTAssertEqual(unpushed.count, 3, "Should have 3 unpushed commits")
@@ -668,7 +668,7 @@ final class RemoteTests: LibGit2SwiftTestCase {
         }
 
         // 获取未推送的提交（没有上游分支）
-        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath, verbose: true)
 
         // 应该返回空数组
         XCTAssertEqual(unpushed.count, 0, "Should return empty array when no upstream branch")
@@ -703,7 +703,7 @@ final class RemoteTests: LibGit2SwiftTestCase {
         // 不创建新提交
 
         // 获取未推送的提交
-        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath, verbose: true)
 
         // 应该返回空数组（所有提交都已同步）
         XCTAssertEqual(unpushed.count, 0, "Should return empty array when all commits are synced")
@@ -797,7 +797,7 @@ final class RemoteTests: LibGit2SwiftTestCase {
         }
 
         // 获取未推送的提交
-        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath)
+        let unpushed = try LibGit2.getUnPushedCommits(at: testRepo.repositoryPath, verbose: true)
 
         // 验证数量
         XCTAssertEqual(unpushed.count, commitCount,
