@@ -12,6 +12,11 @@ public class LibGit2: SuperLog {
     /// 初始化 libgit2（应用启动时调用一次）
     public static func initialize() {
         git_libgit2_init()
+
+        // 注意：git_libgit2_opts 是可变参数函数，在 Swift 中不可直接调用
+        // 大多数情况下 libgit2 会自动找到正确的 HOME 目录
+        // 如果需要设置 HOMEDIR，可以通过环境变量实现
+        os_log("\(Self.t)✅ LibGit2 initialized")
     }
 
     /// 清理 libgit2（应用退出时调用）

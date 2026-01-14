@@ -215,6 +215,7 @@ public let gitCredentialCallback: @convention(c) (
         }
     }
 
+    // 尝试使用文件密钥（SSH KEY 认证）
     if allowed_types & GIT_CREDENTIAL_SSH_KEY.rawValue != 0 {
         // SSH 密钥认证
         // 从 URL 中提取用户名（例如 git@github.com 中的 "git"）
@@ -259,20 +260,10 @@ public let gitCredentialCallback: @convention(c) (
         }
     }
 
-    // 尝试 SSH agent（如果可用）
+    // 尝试 SSH 内存密钥（适用于内存中的密钥数据）
     if allowed_types & GIT_CREDENTIAL_SSH_MEMORY.rawValue != 0 {
-        // 尝试使用内存中的凭据（例如从 SSH agent）
-        let defaultUsername = username_from_url.map { String(cString: $0) } ?? "git"
-
-        let result = defaultUsername.withCString { usernamePtr in
-            // 对于 SSH agent，我们可以尝试使用 SSH 自定义凭据类型
-            // 但 libgit2 没有直接支持 SSH agent，所以这里返回错误让用户手动配置
-            -1
-        }
-
-        if result == 0 {
-            return 0
-        }
+        // 目前不支持内存中的密钥数据
+        // 如果需要支持，可以在这里实现 git_credential_ssh_key_memory_new
     }
 
     return Int32(GIT_EUSER.rawValue)

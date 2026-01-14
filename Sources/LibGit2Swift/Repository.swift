@@ -188,4 +188,55 @@ extension LibGit2 {
 
         throw LibGit2Error.repositoryNotFound(path)
     }
+
+    // MARK: - Remote URL Helpers
+
+    /// 获取远程仓库的 URL
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - remote: 远程仓库名称（默认 "origin"）
+    /// - Returns: 远程 URL，如果失败返回 nil
+    public static func getRemoteURL(at path: String, remote: String = "origin") -> String? {
+        do {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
+
+            var remotePtr: OpaquePointer?
+            let result = git_remote_lookup(&remotePtr, repo, remote)
+
+            if result == 0, let r = remotePtr {
+                let url = git_remote_url(r)
+                if let urlPtr = url {
+                    let urlString = String(cString: urlPtr)
+                    git_remote_free(r)
+                    return urlString
+                }
+                git_remote_free(r)
+            }
+        } catch {
+            return nil
+        }
+
+        return nil
+    }
+
+    /// 设置远程仓库的 URL
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - remote: 远程仓库名称
+    ///   - url: 新的 URL
+    public static func setRemoteURL(at path: String, remote: String = "origin", url: String) throws {
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        let setResult = url.withCString { urlPtr in
+            remote.withCString { remotePtr in
+                git_remote_set_url(repo, remotePtr, urlPtr)
+            }
+        }
+
+        if setResult != 0 {
+            throw LibGit2Error.remoteNotFound(remote)
+        }
+    }
 }
