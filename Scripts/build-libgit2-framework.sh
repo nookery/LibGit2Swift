@@ -2,6 +2,7 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_ROOT="$SCRIPT_DIR/.."
 export TEMP_DIR="$REPO_ROOT/temp"
+export DOWNLOADS_DIR="$TEMP_DIR/downloads"
 
 set -e
 
@@ -11,10 +12,16 @@ echo "📁 Repository root: $REPO_ROOT"
 echo "📁 Temp directory: $TEMP_DIR"
 
 echo "🧹 Cleaning up previous build artifacts..."
-rm -rf $TEMP_DIR
+# Create temp directory structure, preserving downloads
 mkdir -p $TEMP_DIR
+mkdir -p $DOWNLOADS_DIR
+# Remove build artifacts but keep downloaded source packages
+rm -rf $TEMP_DIR/install*
+rm -rf $TEMP_DIR/openssl-*
+rm -rf $TEMP_DIR/libssh2-*
+rm -rf $TEMP_DIR/libgit2-*
 rm -rf $REPO_ROOT/Sources/Clibgit2.xcframework
-echo "✅ Cleanup completed"
+echo "✅ Cleanup completed (preserved downloaded files in $DOWNLOADS_DIR)"
 
 AVAILABLE_PLATFORMS=(iphoneos iphonesimulator maccatalyst maccatalyst-arm64 macosx-arm64 macosx)
 
@@ -118,8 +125,13 @@ function build_openssl() {
     # It is better to remove and redownload the source since building make the source code directory dirty!
     echo "📦 Downloading and extracting OpenSSL..."
     rm -rf openssl-$version
-    test -f openssl-$version.tar.gz || wget -q https://www.openssl.org/source/openssl-$version.tar.gz
-    tar xzf openssl-$version.tar.gz
+    if [ ! -f "$DOWNLOADS_DIR/openssl-$version.tar.gz" ]; then
+        echo "⬇️  Downloading OpenSSL $version..."
+        wget -q -O "$DOWNLOADS_DIR/openssl-$version.tar.gz" https://www.openssl.org/source/openssl-$version.tar.gz
+    else
+        echo "📦 Using cached OpenSSL $version archive"
+    fi
+    tar xzf "$DOWNLOADS_DIR/openssl-$version.tar.gz"
     cd openssl-$version
     echo "📦 OpenSSL source ready"
 
@@ -166,8 +178,13 @@ function build_libssh2() {
 
     echo "📦 Downloading and extracting libssh2..."
     rm -rf libssh2-$version
-    test -f libssh2-$version.tar.gz || wget -q https://www.libssh2.org/download/libssh2-$version.tar.gz
-    tar xzf libssh2-$version.tar.gz
+    if [ ! -f "$DOWNLOADS_DIR/libssh2-$version.tar.gz" ]; then
+        echo "⬇️  Downloading libssh2 $version..."
+        wget -q -O "$DOWNLOADS_DIR/libssh2-$version.tar.gz" https://www.libssh2.org/download/libssh2-$version.tar.gz
+    else
+        echo "📦 Using cached libssh2 $version archive"
+    fi
+    tar xzf "$DOWNLOADS_DIR/libssh2-$version.tar.gz"
     cd libssh2-$version
 
     echo "🔧 Configuring libssh2 build..."
@@ -196,8 +213,13 @@ function build_libgit2() {
 
     echo "📦 Downloading and extracting libgit2..."
     rm -rf libgit2-$version
-    test -f v$version.zip || wget -q https://github.com/libgit2/libgit2/archive/refs/tags/v$version.zip
-    ditto -x -k --sequesterRsrc --rsrc v$version.zip ./
+    if [ ! -f "$DOWNLOADS_DIR/libgit2-v$version.zip" ]; then
+        echo "⬇️  Downloading libgit2 v$version..."
+        wget -q -O "$DOWNLOADS_DIR/libgit2-v$version.zip" https://github.com/libgit2/libgit2/archive/refs/tags/v$version.zip
+    else
+        echo "📦 Using cached libgit2 v$version archive"
+    fi
+    ditto -x -k --sequesterRsrc --rsrc "$DOWNLOADS_DIR/libgit2-v$version.zip" ./
     cd libgit2-$version
 
     echo "🔧 Configuring libgit2 build..."
@@ -308,3 +330,4 @@ echo ""
 echo "🎉 Build process completed successfully!"
 echo "📁 XCFramework available at: Sources/Clibgit2.xcframework"
 echo "📁 Temp files are in: $TEMP_DIR (can be deleted after verification)"
+echo "📁 Downloaded source packages are cached in: $DOWNLOADS_DIR"
