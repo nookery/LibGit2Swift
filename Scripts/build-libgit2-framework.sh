@@ -118,7 +118,7 @@ function build_libpcre() {
 
 ### Build openssl for a given platform
 function build_openssl() {
-    version="3.0.0"
+    version="3.0.14"
     echo "🔐 Building OpenSSL $version for platform: $1"
     setup_variables $1 install-openssl
 
@@ -146,11 +146,11 @@ function build_openssl() {
 
         "maccatalyst"|"maccatalyst-arm64")
             TARGET_OS=darwin64-$ARCH-cc
-            export CFLAGS="-isysroot $SYSROOT -target $ARCH-apple-ios14.1-macabi";;
+            export CFLAGS="-isysroot $SYSROOT -target $ARCH-apple-ios14.1-macabi -mmacosx-version-min=12.4";;
 
         "macosx"|"macosx-arm64")
             TARGET_OS=darwin64-$ARCH-cc
-            export CFLAGS="-isysroot $SYSROOT";;
+            export CFLAGS="-isysroot $SYSROOT -mmacosx-version-min=12.4";;
 
         *)
             echo "Unsupported or missing platform!";;
@@ -172,7 +172,7 @@ function build_openssl() {
 
 ### Build libssh2 for a given platform (assume openssl was built)
 function build_libssh2() {
-    version="1.10.0"
+    version="1.11.1"
     echo "🔐 Building libssh2 $version for platform: $1"
     setup_variables $1 install-libssh2
 
@@ -207,7 +207,7 @@ function build_libssh2() {
 ### See @setup_variables for the list of available platform names
 ### Assume openssl and libssh2 was built
 function build_libgit2() {
-    version="1.3.0"
+    version="1.9.2"
     echo "📚 Building libgit2 v$version for platform: $1"
     setup_variables $1 install
 
@@ -227,7 +227,10 @@ function build_libgit2() {
 
     # The CMake function that determines if `libssh2_userauth_publickey_frommemory` is defined doesn't
     # work when everything is statically linked. Manually override GIT_SSH_MEMORY_CREDENTIALS.
-    CMAKE_ARGS+=(-DBUILD_CLAR=NO -DGIT_SSH_MEMORY_CREDENTIALS=1 -DCMAKE_PREFIX_PATH="$TEMP_DIR/install-libssh2/$PLATFORM;$TEMP_DIR/install-openssl/$PLATFORM")
+    # Also include PCRE path to avoid linking against system PCRE dylib.
+    # Disable tests and examples to avoid iOS build issues.
+    # Enable SSH support with libssh2
+    CMAKE_ARGS+=(-DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DGIT_SSH_MEMORY_CREDENTIALS=1 -DUSE_SSH=ON -DCMAKE_PREFIX_PATH="$TEMP_DIR/install-libssh2/$PLATFORM;$TEMP_DIR/install-openssl/$PLATFORM;$TEMP_DIR/install/$PLATFORM")
 
     echo "⚙️  Running CMake for libgit2..."
     cmake "${CMAKE_ARGS[@]}" ..
@@ -306,15 +309,23 @@ for p in ${AVAILABLE_PLATFORMS[@]}; do
     echo "🚀 Building libraries for platform: $p"
     echo "========================================"
 
-    # build_libpcre $p
+    build_libpcre $p
     build_openssl $p
     build_libssh2 $p
     build_libgit2 $p
 
     # Put all of the generated *.a files into a single *.a file that will be in our framework
+    # Note: Order matters for static linking! Libraries that use symbols must come BEFORE libraries that provide them.
+    # libgit2 depends on: libssh2, OpenSSL, PCRE, zlib
+    # libssh2 depends on: OpenSSL, zlib
     echo "🔗 Combining static libraries for $p..."
     cd $REPO_ROOT
-    libtool -v -static -o libgit2_all.a temp/install-openssl/$p/lib/*.a temp/install/$p/lib/*.a temp/install-libssh2/$p/lib/*.a
+    libtool -v -static -o libgit2_all.a \
+        temp/install/$p/lib/libgit2.a \
+        temp/install/$p/lib/libpcre.a \
+        temp/install-libssh2/$p/lib/libssh2.a \
+        temp/install-openssl/$p/lib/libssl.a \
+        temp/install-openssl/$p/lib/libcrypto.a
     cp libgit2_all.a temp/install/$p/lib
     rm libgit2_all.a
     echo "✅ Library combination completed for $p"

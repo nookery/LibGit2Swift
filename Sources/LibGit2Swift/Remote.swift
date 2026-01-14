@@ -299,17 +299,22 @@ extension LibGit2 {
             let name = String(cString: namePtr)
 
             var remote: OpaquePointer? = nil
-            defer { if remote != nil { git_remote_free(remote) } }
 
             if git_remote_lookup(&remote, repo, name) == 0, let remotePtr = remote {
-                let url = git_remote_url(remotePtr)
-                let fetchURL = url != nil ? String(cString: url!) : nil
+                // 安全地获取 URL
+                var fetchURL: String? = nil
+                if let urlPtr = git_remote_url(remotePtr) {
+                    fetchURL = String(cString: urlPtr)
+                }
 
-                // 如果没有单独的push URL，使用fetch URL
+                // 安全地获取 push URL
                 var pushURL: String? = nil
                 if let pushURLPtr = git_remote_pushurl(remotePtr) {
                     pushURL = String(cString: pushURLPtr)
-                } else {
+                }
+
+                // 如果没有单独的push URL，使用fetch URL
+                if pushURL == nil {
                     pushURL = fetchURL
                 }
 
@@ -323,6 +328,10 @@ extension LibGit2 {
                     pushURL: pushURL,
                     isDefault: isDefault
                 ))
+
+                // 在添加到数组后立即释放 remote
+                git_remote_free(remote)
+                remote = nil
             }
         }
 
@@ -336,21 +345,25 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func addRemote(name: String, url: String, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Adding remote: %{public}@ -> %{public}@", name, url) }
-
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
         var remote: OpaquePointer? = nil
-        defer { if remote != nil { git_remote_free(remote) } }
 
-        let result = git_remote_create(&remote, repo, name, url)
+        // 使用 UTF8 字符串来确保正确的编码
+        try name.withCString { namePtr in
+            try url.withCString { urlPtr in
+                let result = git_remote_create(&remote, repo, namePtr, urlPtr)
 
-        if result != 0 {
-            throw LibGit2Error.remoteNotFound(name)
+                if result != 0 {
+                    throw LibGit2Error.remoteNotFound(name)
+                }
+            }
         }
 
-        if verbose { os_log("🐚 LibGit2: Remote added: %{public}@", name) }
+        if remote != nil {
+            git_remote_free(remote)
+        }
     }
 
     /// 删除远程仓库

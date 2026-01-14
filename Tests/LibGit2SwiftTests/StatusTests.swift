@@ -20,9 +20,10 @@ final class StatusTests: LibGit2SwiftTestCase {
         let fileURL = testRepo.tempDirectory.appendingPathComponent(fileName)
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
 
-        // 应该检测到未提交的更改
+        // 未跟踪的文件不应该算作"未提交的更改"
+        // 只有已跟踪文件的修改、暂存等才算
         let hasChanges = try LibGit2.hasUncommittedChanges(at: testRepo.repositoryPath)
-        XCTAssertTrue(hasChanges, "Repository with untracked files should have uncommitted changes")
+        XCTAssertFalse(hasChanges, "Repository with only untracked files should not have uncommitted changes")
     }
 
     func testHasUncommittedChangesWithModifiedFile() throws {
