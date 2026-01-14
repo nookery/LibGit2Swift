@@ -10,7 +10,13 @@
       "Bash(git checkout:*)",
       "Bash(cat:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(bash:*)",
+      "Bash(cmake:*)",
+      "Bash(lldb:*)",
+      "Bash(otool:*)",
+      "Bash(nm:*)",
+      "Bash(find:*)"
     ]
   }
 }
