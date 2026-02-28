@@ -187,25 +187,29 @@ extension LibGit2 {
 
         let tagNameRef = "refs/tags/\(tagName)"
 
-        // 首先尝试查找带注释的标签
-        var tag: OpaquePointer? = nil
-        defer { if tag != nil { git_tag_free(tag) } }
-
-        if git_tag_lookup(&tag, repo, &targetOID) == 0, let tagPtr = tag {
-            let tagTargetOID = git_tag_target_id(tagPtr)
-            return git_oid_equal(tagTargetOID, &targetOID) == 1
-        }
-
-        // 尝试轻量标签
+        // 首先查找标签引用
         var reference: OpaquePointer? = nil
         defer { if reference != nil { git_reference_free(reference) } }
 
-        if git_reference_lookup(&reference, repo, tagNameRef) == 0, let ref = reference {
-            if let target = git_reference_target(ref) {
-                return git_oid_equal(target, &targetOID) == 1
-            }
+        guard git_reference_lookup(&reference, repo, tagNameRef) == 0, let ref = reference else {
+            return false
         }
 
-        return false
+        guard let tagRefOID = git_reference_target(ref) else {
+            return false
+        }
+
+        // 尝试查找带注释的标签
+        var tag: OpaquePointer? = nil
+        defer { if tag != nil { git_tag_free(tag) } }
+
+        if git_tag_lookup(&tag, repo, tagRefOID) == 0, let tagPtr = tag {
+            // 带注释的标签，获取它指向的 commit OID
+            let tagTargetOID = git_tag_target_id(tagPtr)
+            return git_oid_equal(tagTargetOID, &targetOID) == 1
+        } else {
+            // 轻量标签，直接比较 OID
+            return git_oid_equal(tagRefOID, &targetOID) == 1
+        }
     }
 }
