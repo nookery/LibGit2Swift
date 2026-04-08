@@ -31,7 +31,23 @@ public struct GitCommit: Identifiable, Codable, Hashable {
     public let refs: [String]
     public let tags: [String]
 
-    public init(id: String, hash: String, author: String, email: String, date: Date, message: String, body: String, refs: [String], tags: [String]) {
+    /// 父提交的哈希列表
+    /// - 普通提交：1 个父提交
+    /// - 合并提交：2 个或更多父提交
+    /// - 初始提交：空数组
+    public let parentHashes: [String]
+
+    /// 是否为初始提交（没有父提交）
+    public var isInitialCommit: Bool {
+        parentHashes.isEmpty
+    }
+
+    /// 是否为合并提交（有多个父提交）
+    public var isMergeCommit: Bool {
+        parentHashes.count > 1
+    }
+
+    public init(id: String, hash: String, author: String, email: String, date: Date, message: String, body: String, refs: [String], tags: [String], parentHashes: [String] = []) {
         self.id = id
         self.hash = hash
         self.author = author
@@ -41,6 +57,7 @@ public struct GitCommit: Identifiable, Codable, Hashable {
         self.body = body
         self.refs = refs
         self.tags = tags
+        self.parentHashes = parentHashes
     }
 }
 

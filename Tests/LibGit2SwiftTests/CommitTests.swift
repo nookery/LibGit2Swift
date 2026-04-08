@@ -282,4 +282,284 @@ final class CommitTests: LibGit2SwiftTestCase {
             _ = try? LibGit2.getCommitList(at: testRepo.repositoryPath)
         }
     }
+
+    // MARK: - Parent Hashes Tests
+
+    /// 测试初始提交没有父提交
+    func testInitialCommitHasNoParents() throws {
+        // 创建第一个提交（初始提交）
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "Initial commit"
+        )
+
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have exactly one commit")
+
+        let initialCommit = commits[0]
+        XCTAssertTrue(initialCommit.parentHashes.isEmpty, "Initial commit should have no parent hashes")
+        XCTAssertTrue(initialCommit.isInitialCommit, "Should be identified as initial commit")
+        XCTAssertFalse(initialCommit.isMergeCommit, "Initial commit should not be a merge commit")
+    }
+
+    /// 测试普通提交有一个父提交
+    func testRegularCommitHasOneParent() throws {
+        // 创建两个提交
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 2, "Should have exactly two commits")
+
+        // 最新的提交（index 0）应该有一个父提交，指向第一个提交
+        let latestCommit = commits[0]
+        XCTAssertEqual(latestCommit.parentHashes.count, 1, "Regular commit should have exactly one parent")
+        XCTAssertEqual(latestCommit.parentHashes[0], commits[1].hash, "Parent hash should match the first commit")
+        XCTAssertFalse(latestCommit.isInitialCommit, "Second commit should not be initial commit")
+        XCTAssertFalse(latestCommit.isMergeCommit, "Regular commit should not be a merge commit")
+
+        // 第一个提交（初始提交）没有父提交
+        let firstCommit = commits[1]
+        XCTAssertTrue(firstCommit.parentHashes.isEmpty, "First commit should have no parents")
+    }
+
+    /// 测试多个提交的父提交链完整性
+    func testCommitParentChain() throws {
+        // 创建 5 个提交
+        for i in 1...5 {
+            try testRepo.createFileAndCommit(
+                fileName: "file\(i).txt",
+                content: "Content \(i)",
+                message: "Commit \(i)"
+            )
+        }
+
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 5, "Should have exactly 5 commits")
+
+        // 验证父提交链：每个提交的 parent 应该指向下一个（更早的）提交
+        for i in 0..<(commits.count - 1) {
+            XCTAssertEqual(commits[i].parentHashes.count, 1,
+                "Commit \(i) should have exactly one parent")
+            XCTAssertEqual(commits[i].parentHashes[0], commits[i + 1].hash,
+                "Commit \(i)'s parent should be commit \(i + 1)")
+        }
+
+        // 最后一个（最老的）提交是初始提交
+        XCTAssertTrue(commits.last!.parentHashes.isEmpty,
+            "The oldest commit should be the initial commit with no parents")
+    }
+
+    /// 测试 getCommitDetail 也返回正确的 parentHashes
+    func testGetCommitDetailWithParentHashes() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let secondCommit = commits[0] // 最新的
+
+        // 通过 getCommitDetail 获取详细信息
+        let detail = try LibGit2.getCommitDetail(commitHash: secondCommit.hash, at: testRepo.repositoryPath)
+        XCTAssertNotNil(detail, "Detail should not be nil")
+        XCTAssertEqual(detail?.parentHashes.count, 1, "Detail should have one parent hash")
+        XCTAssertEqual(detail?.parentHashes[0], commits[1].hash, "Parent hash should match first commit")
+    }
+
+    // MARK: - Undo Commit (Reset Mixed) Tests
+
+    /// 测试撤销最新的提交（普通提交）
+    /// 验证 reset --mixed 后：
+    /// 1. 提交被移除
+    /// 2. 文件变更保留在工作区（未暂存状态）
+    /// 3. 文件内容不变
+    func testUndoLastCommitWithMixedReset() throws {
+        // 创建两个提交
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        // 验证初始状态：2 个提交
+        var commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 2, "Should have 2 commits before undo")
+        XCTAssertEqual(commits[0].message, "Second commit")
+
+        // 获取最新提交的父提交哈希
+        let latestCommit = commits[0]
+        let parentHash = latestCommit.parentHashes[0]
+
+        // 执行 mixed reset（撤销最新提交）
+        try LibGit2.reset(to: parentHash, mode: "mixed", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证：只剩 1 个提交
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit after undo")
+        XCTAssertEqual(commits[0].message, "First commit", "Remaining commit should be the first one")
+
+        // 验证：file2.txt 仍然存在于磁盘
+        assertFileExists("file2.txt", in: testRepo)
+
+        // 验证：file2.txt 内容不变
+        let content = try testRepo.readFile("file2.txt")
+        XCTAssertEqual(content, "Content 2", "File content should be preserved after undo")
+
+        // 验证：file2.txt 出现在未暂存文件列表中（工作区变更）
+        let unstagedFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: false)
+        let hasFile2 = unstagedFiles.contains { $0.file == "file2.txt" }
+        XCTAssertTrue(hasFile2, "file2.txt should appear as unstaged change after undo")
+    }
+
+    /// 测试撤销提交后，文件变更可以重新提交
+    func testUndoAndRecommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        // 创建第二个提交
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        // 撤销第二个提交
+        var commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let parentHash = commits[0].parentHashes[0]
+        try LibGit2.reset(to: parentHash, mode: "mixed", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证只剩 1 个提交
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1)
+
+        // 将撤销的文件重新添加并提交（用新的提交消息）
+        try LibGit2.addFiles(["file2.txt"], at: testRepo.repositoryPath)
+        _ = try LibGit2.createCommit(message: "Recommitted: Second commit", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证：重新提交成功
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 2, "Should have 2 commits after recommit")
+        XCTAssertEqual(commits[0].message, "Recommitted: Second commit", "Latest commit should be the recommit")
+    }
+
+    /// 测试连续撤销多个提交
+    func testUndoMultipleCommitsSequentially() throws {
+        // 创建 3 个提交
+        try testRepo.createFileAndCommit(fileName: "file1.txt", content: "C1", message: "Commit 1")
+        try testRepo.createFileAndCommit(fileName: "file2.txt", content: "C2", message: "Commit 2")
+        try testRepo.createFileAndCommit(fileName: "file3.txt", content: "C3", message: "Commit 3")
+
+        // 验证有 3 个提交
+        var commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 3)
+
+        // 撤销第 3 个提交
+        let parentHash3 = commits[0].parentHashes[0]
+        try LibGit2.reset(to: parentHash3, mode: "mixed", at: testRepo.repositoryPath, verbose: false)
+
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 2, "Should have 2 commits after first undo")
+        XCTAssertEqual(commits[0].message, "Commit 2")
+
+        // 撤销第 2 个提交
+        let parentHash2 = commits[0].parentHashes[0]
+        try LibGit2.reset(to: parentHash2, mode: "mixed", at: testRepo.repositoryPath, verbose: false)
+
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit after second undo")
+        XCTAssertEqual(commits[0].message, "Commit 1")
+
+        // 验证所有文件仍然存在
+        assertFileExists("file1.txt", in: testRepo)
+        assertFileExists("file2.txt", in: testRepo)
+        assertFileExists("file3.txt", in: testRepo)
+    }
+
+    /// 测试 soft reset（撤销提交但保留暂存区）
+    func testUndoCommitWithSoftReset() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        // 获取父提交
+        var commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let parentHash = commits[0].parentHashes[0]
+
+        // 执行 soft reset
+        try LibGit2.reset(to: parentHash, mode: "soft", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证只剩 1 个提交
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit after soft reset")
+
+        // 验证：file2.txt 出现在暂存区（staged）
+        let stagedFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: true)
+        let hasFile2Staged = stagedFiles.contains { $0.file == "file2.txt" }
+        XCTAssertTrue(hasFile2Staged, "file2.txt should be staged after soft reset")
+    }
+
+    /// 测试 hard reset（撤销提交并丢弃所有变更）
+    func testUndoCommitWithHardReset() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file1.txt",
+            content: "Content 1",
+            message: "First commit"
+        )
+
+        try testRepo.createFileAndCommit(
+            fileName: "file2.txt",
+            content: "Content 2",
+            message: "Second commit"
+        )
+
+        // 获取父提交
+        var commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let parentHash = commits[0].parentHashes[0]
+
+        // 执行 hard reset
+        try LibGit2.reset(to: parentHash, mode: "hard", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证只剩 1 个提交
+        commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit after hard reset")
+
+        // 验证：file2.txt 被删除（变更被丢弃）
+        assertFileNotExists("file2.txt", in: testRepo)
+    }
 }

@@ -283,6 +283,15 @@ extension LibGit2 {
             }
         }
 
+        // 获取父提交哈希列表
+        let parentCount = git_commit_parentcount(commit)
+        var parentHashes: [String] = []
+        for i in 0..<parentCount {
+            if let parentOid = git_commit_parent_id(commit, i) {
+                parentHashes.append(oidToString(parentOid.pointee))
+            }
+        }
+
         return GitCommit(
             id: hash,
             hash: hash,
@@ -292,7 +301,8 @@ extension LibGit2 {
             message: shortMessage,
             body: body,
             refs: refs,
-            tags: tags
+            tags: tags,
+            parentHashes: parentHashes
         )
     }
 
