@@ -242,6 +242,25 @@ final class DiffTests: LibGit2SwiftTestCase {
         XCTAssertTrue(diffFiles.contains { $0.file == "test.txt" }, "Should have test.txt in staged diff")
     }
 
+    func testGetDiffFileListStagedAddedFileIncludesDiffContent() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "existing.txt",
+            content: "Existing content",
+            message: "Initial commit"
+        )
+
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("newfile.txt")
+        try "New staged file".write(to: fileURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["newfile.txt"], at: testRepo.repositoryPath)
+
+        let diffFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: true)
+        let newFile = try XCTUnwrap(diffFiles.first(where: { $0.file == "newfile.txt" }))
+
+        XCTAssertEqual(newFile.changeType, "A", "New staged file should be marked as added")
+        XCTAssertFalse(newFile.diff.isEmpty, "Staged added file should carry patch text")
+        XCTAssertTrue(newFile.diff.contains("New staged file"), "Patch should contain new file content")
+    }
+
     func testGetDiffFileListCleanRepository() throws {
         // 创建初始提交
         try testRepo.createFileAndCommit(
@@ -547,6 +566,27 @@ final class DiffTests: LibGit2SwiftTestCase {
         // 初始提交应该有 diff（与空树比较）
         XCTAssertTrue(diff.contains("initial.txt"), "Diff should contain file name")
         XCTAssertTrue(diff.contains("Line 1"), "Diff should show content")
+    }
+
+    func testGetFileDiffUntrackedFile() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "existing.txt",
+            content: "Existing content",
+            message: "Initial commit"
+        )
+
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("newfile.txt")
+        try "New untracked file".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let diff = try LibGit2.getFileDiff(
+            for: "newfile.txt",
+            at: testRepo.repositoryPath,
+            staged: false
+        )
+
+        XCTAssertFalse(diff.isEmpty, "Untracked file diff should not be empty")
+        XCTAssertTrue(diff.contains("newfile.txt"), "Diff should contain file name")
+        XCTAssertTrue(diff.contains("New untracked file"), "Diff should contain file content")
     }
 
     func testGetFileDiffMultiLineChanges() throws {

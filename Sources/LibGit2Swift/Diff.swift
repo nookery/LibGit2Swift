@@ -146,6 +146,8 @@ extension LibGit2 {
                 diffOpts.pathspec.strings = buffer.baseAddress
                 diffOpts.pathspec.count = 1
             }
+            diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
+                            GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
 
             defer {
                 free(filePathCStr)
@@ -175,6 +177,10 @@ extension LibGit2 {
                     patchText += content
                 }
             }
+        }
+
+        if patchText.isEmpty, staged == false {
+            return try makeSyntheticWorkdirDiff(for: file, at: path)
         }
 
         return patchText
@@ -696,5 +702,64 @@ extension LibGit2 {
         default:
             return " "
         }
+    }
+
+    private static func makeSyntheticWorkdirDiff(for filePath: String, at repoPath: String) throws -> String {
+        let (before, after) = try getUncommittedFileContentChange(for: filePath, at: repoPath)
+        guard before != nil || after != nil else {
+            return ""
+        }
+
+        return buildUnifiedDiff(filePath: filePath, before: before, after: after)
+    }
+
+    private static func buildUnifiedDiff(filePath: String, before: String?, after: String?) -> String {
+        let beforeLines = normalizedDiffLines(before)
+        let afterLines = normalizedDiffLines(after)
+
+        var header = "diff --git a/\(filePath) b/\(filePath)\n"
+        let body: String
+
+        switch (before, after) {
+        case (nil, let newContent?):
+            header += "new file mode 100644\n"
+            header += "--- /dev/null\n"
+            header += "+++ b/\(filePath)\n"
+            body = "@@ -0,0 +1,\(afterLines.count) @@\n" + prefixedDiffLines(newContent, prefix: "+")
+        case (let oldContent?, nil):
+            header += "--- a/\(filePath)\n"
+            header += "+++ /dev/null\n"
+            body = "@@ -1,\(beforeLines.count) +0,0 @@\n" + prefixedDiffLines(oldContent, prefix: "-")
+        case (let oldContent?, let newContent?):
+            header += "--- a/\(filePath)\n"
+            header += "+++ b/\(filePath)\n"
+            body = "@@ -1,\(beforeLines.count) +1,\(afterLines.count) @@\n"
+                + prefixedDiffLines(oldContent, prefix: "-")
+                + prefixedDiffLines(newContent, prefix: "+")
+        default:
+            return ""
+        }
+
+        return header + body
+    }
+
+    private static func normalizedDiffLines(_ text: String?) -> [String] {
+        guard var lines = text?.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) else {
+            return []
+        }
+
+        if text?.hasSuffix("\n") == true, lines.last == "" {
+            lines.removeLast()
+        }
+
+        return lines
+    }
+
+    private static func prefixedDiffLines(_ text: String, prefix: String) -> String {
+        let lines = normalizedDiffLines(text)
+        if lines.isEmpty {
+            return ""
+        }
+        return lines.map { "\(prefix)\($0)\n" }.joined()
     }
 }
