@@ -166,6 +166,12 @@ extension LibGit2 {
         var patchText = ""
 
         for i in 0..<count {
+            // 🔧 修复：检查 delta 状态，对于未跟踪/新增文件需要特殊处理
+            var deltaType: git_delta_t = GIT_DELTA_UNMODIFIED
+            if let delta = git_diff_get_delta(diffPtr, i) {
+                deltaType = delta.pointee.status
+            }
+
             if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
                 var buf = git_buf()
                 defer { git_buf_dispose(&buf) }
@@ -173,6 +179,15 @@ extension LibGit2 {
                 if git_patch_to_buf(&buf, patchPtr) == 0 {
                     let content = String(cString: buf.ptr)
                     patchText += content
+                }
+            }
+
+            //  修复：对于未跟踪的新增文件或 diff 为空的 ADDED 文件，手动生成完整的 diff 内容
+            // Libgit2 不会为 GIT_DELTA_UNTRACKED 生成 patch，需要手动构建
+            if patchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let isNewOrUntracked = (deltaType == GIT_DELTA_UNTRACKED || deltaType == GIT_DELTA_ADDED)
+                if isNewOrUntracked {
+                    patchText = generateAddedFileDiff(for: file, at: path)
                 }
             }
         }
@@ -641,6 +656,15 @@ extension LibGit2 {
                 }
             }
 
+            // 🔧 修复：对于未跟踪的新增文件或 diff 为空的 ADDED 文件，手动生成完整的 diff 内容
+            // Libgit2 不会为 GIT_DELTA_UNTRACKED 生成 patch，需要手动构建
+            if diffContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let isNewOrUntracked = (deltaType == GIT_DELTA_UNTRACKED || deltaType == GIT_DELTA_ADDED)
+                if isNewOrUntracked {
+                    diffContent = generateAddedFileDiff(for: filePath, at: path)
+                }
+            }
+
             files.append(GitDiffFile(
                 id: filePath,
                 file: filePath,
@@ -650,6 +674,45 @@ extension LibGit2 {
         }
 
         return files
+    }
+
+    /// 为新增文件手动生成完整的 diff 内容
+    /// 对于未跟踪的新文件，libgit2 不会生成 patch，这里手动构建标准 git diff 格式
+    /// - Parameters:
+    ///   - filePath: 文件相对路径
+    ///   - repoPath: 仓库根路径
+    /// - Returns: 标准格式的 git diff 字符串（整个文件内容标记为新增）
+    private static func generateAddedFileDiff(for filePath: String, at repoPath: String) -> String {
+        let fullPath = URL(fileURLWithPath: repoPath).appendingPathComponent(filePath).path
+        guard FileManager.default.fileExists(atPath: fullPath) else {
+            return ""
+        }
+
+        guard let content = try? String(contentsOfFile: fullPath, encoding: .utf8) else {
+            return ""
+        }
+
+        if content.isEmpty {
+            // 空文件，生成空 diff header
+            return "diff --git a/\(filePath) b/\(filePath)\nnew file mode 100644\nindex 0000000..e69de29\n--- /dev/null\n+++ b/\(filePath)\n@@ -0,0 +1 @@\n+\n"
+        }
+
+        let lines = content.components(separatedBy: .newlines)
+        let lineCount = lines.count
+
+        // 构建标准 git diff 格式
+        var diff = "diff --git a/\(filePath) b/\(filePath)\n"
+        diff += "new file mode 100644\n"
+        diff += "index 0000000..e69de29\n"
+        diff += "--- /dev/null\n"
+        diff += "+++ b/\(filePath)\n"
+        diff += "@@ -0,0 +1,\(lineCount) @@\n"
+
+        for line in lines {
+            diff += "+\(line)\n"
+        }
+
+        return diff
     }
 
     /// 转换 delta 状态为字符串标识
