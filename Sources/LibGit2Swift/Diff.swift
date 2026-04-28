@@ -146,6 +146,8 @@ extension LibGit2 {
                 diffOpts.pathspec.strings = buffer.baseAddress
                 diffOpts.pathspec.count = 1
             }
+            diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
+                            GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
 
             defer {
                 free(filePathCStr)
@@ -190,6 +192,10 @@ extension LibGit2 {
                     patchText = generateAddedFileDiff(for: file, at: path)
                 }
             }
+        }
+
+        if patchText.isEmpty, staged == false {
+            return try makeSyntheticWorkdirDiff(for: file, at: path)
         }
 
         return patchText
@@ -345,6 +351,21 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件内容字符串
     public static func getFileContent(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> String {
+        let data = try getFileData(atCommit: commitHash, file: filePath, at: repoPath)
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw LibGit2Error.invalidValue
+        }
+        return content
+    }
+
+    /// 获取指定提交中文件的原始二进制数据
+    /// 支持二进制文件（图片、字体等），返回原始的 Data
+    /// - Parameters:
+    ///   - commitHash: 提交哈希
+    ///   - filePath: 文件路径
+    ///   - repoPath: 仓库路径
+    /// - Returns: 文件的原始二进制数据
+    public static func getFileData(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> Data {
         let repo = try openRepository(at: repoPath)
         defer { git_repository_free(repo) }
 
@@ -368,29 +389,26 @@ extension LibGit2 {
         }
 
         var treeEntry: OpaquePointer? = nil
+        guard git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry else {
+            throw LibGit2Error.invalidValue
+        }
+        defer { git_tree_entry_free(entry) }
 
-        if git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry {
-            defer { git_tree_entry_free(entry) }
+        var blob: OpaquePointer? = nil
+        let entryOid = git_tree_entry_id(entry)
+        guard git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob else {
+            throw LibGit2Error.invalidValue
+        }
+        defer { git_blob_free(blobPtr) }
 
-            var blob: OpaquePointer? = nil
-            defer { if blob != nil { git_blob_free(blob) } }
+        let contentPtr = git_blob_rawcontent(blobPtr)
+        let size = git_blob_rawsize(blobPtr)
 
-            let entryOid = git_tree_entry_id(entry)
-
-            if git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob {
-                let contentPtr = git_blob_rawcontent(blobPtr)
-                let size = git_blob_rawsize(blobPtr)
-
-                if let ptr = contentPtr {
-                    let data = Data(bytes: ptr, count: Int(size))
-                    if let content = String(data: data, encoding: .utf8) {
-                        return content
-                    }
-                }
-            }
+        guard let ptr = contentPtr else {
+            throw LibGit2Error.invalidValue
         }
 
-        throw LibGit2Error.invalidValue
+        return Data(bytes: ptr, count: Int(size))
     }
 
     /// 获取指定提交中文件变更的前后内容
@@ -642,6 +660,15 @@ extension LibGit2 {
                 filePath = String(cString: oldPath ?? newPath!)
             }
 
+            // 检测二进制文件：双重检测策略
+            // 1. 通过 libgit2 的 flags 判断（对已跟踪文件的变更有效）
+            //    GIT_DIFF_FLAG_BINARY = 2
+            let newFileFlags = delta.pointee.new_file.flags
+            let oldFileFlags = delta.pointee.old_file.flags
+            let flagsBinary = (newFileFlags & 2) != 0 || (oldFileFlags & 2) != 0
+            // 2. 通过文件扩展名判断（对未跟踪文件等 flags 未标记的情况作为后备）
+            let isBinary = flagsBinary || GitDiffFile.isBinaryByExtension(filePath)
+
             // 获取 diff 内容
             var diffContent = ""
             var patch: OpaquePointer? = nil
@@ -669,7 +696,8 @@ extension LibGit2 {
                 id: filePath,
                 file: filePath,
                 changeType: changeType,
-                diff: diffContent
+                diff: diffContent,
+                isBinary: isBinary
             ))
         }
 
@@ -737,5 +765,64 @@ extension LibGit2 {
         default:
             return " "
         }
+    }
+
+    private static func makeSyntheticWorkdirDiff(for filePath: String, at repoPath: String) throws -> String {
+        let (before, after) = try getUncommittedFileContentChange(for: filePath, at: repoPath)
+        guard before != nil || after != nil else {
+            return ""
+        }
+
+        return buildUnifiedDiff(filePath: filePath, before: before, after: after)
+    }
+
+    private static func buildUnifiedDiff(filePath: String, before: String?, after: String?) -> String {
+        let beforeLines = normalizedDiffLines(before)
+        let afterLines = normalizedDiffLines(after)
+
+        var header = "diff --git a/\(filePath) b/\(filePath)\n"
+        let body: String
+
+        switch (before, after) {
+        case (nil, let newContent?):
+            header += "new file mode 100644\n"
+            header += "--- /dev/null\n"
+            header += "+++ b/\(filePath)\n"
+            body = "@@ -0,0 +1,\(afterLines.count) @@\n" + prefixedDiffLines(newContent, prefix: "+")
+        case (let oldContent?, nil):
+            header += "--- a/\(filePath)\n"
+            header += "+++ /dev/null\n"
+            body = "@@ -1,\(beforeLines.count) +0,0 @@\n" + prefixedDiffLines(oldContent, prefix: "-")
+        case (let oldContent?, let newContent?):
+            header += "--- a/\(filePath)\n"
+            header += "+++ b/\(filePath)\n"
+            body = "@@ -1,\(beforeLines.count) +1,\(afterLines.count) @@\n"
+                + prefixedDiffLines(oldContent, prefix: "-")
+                + prefixedDiffLines(newContent, prefix: "+")
+        default:
+            return ""
+        }
+
+        return header + body
+    }
+
+    private static func normalizedDiffLines(_ text: String?) -> [String] {
+        guard var lines = text?.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) else {
+            return []
+        }
+
+        if text?.hasSuffix("\n") == true, lines.last == "" {
+            lines.removeLast()
+        }
+
+        return lines
+    }
+
+    private static func prefixedDiffLines(_ text: String, prefix: String) -> String {
+        let lines = normalizedDiffLines(text)
+        if lines.isEmpty {
+            return ""
+        }
+        return lines.map { "\(prefix)\($0)\n" }.joined()
     }
 }

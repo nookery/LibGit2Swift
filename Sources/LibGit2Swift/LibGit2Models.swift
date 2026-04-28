@@ -68,11 +68,54 @@ public struct GitDiffFile: Identifiable, Codable, Hashable {
     public let changeType: String
     public let diff: String
 
-    public init(id: String, file: String, changeType: String, diff: String) {
+    /// 是否为二进制文件（图片、字体、压缩包等）
+    public let isBinary: Bool
+
+    public init(id: String, file: String, changeType: String, diff: String, isBinary: Bool = false) {
         self.id = id
         self.file = file
         self.changeType = changeType
         self.diff = diff
+        self.isBinary = isBinary
+    }
+
+    /// 常见的图片文件扩展名
+    public static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif",
+        "ico", "icns", "webp", "svg", "heic", "heif", "avif",
+    ]
+
+    /// 常见的二进制文件扩展名
+    public static let binaryExtensions: Set<String> = [
+        // 图片
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif",
+        "ico", "icns", "webp", "heic", "heif", "avif",
+        // 字体
+        "ttf", "otf", "woff", "woff2", "eot",
+        // 压缩包
+        "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "dmg", "pkg",
+        // 编译产物
+        "o", "so", "dylib", "a", "lib", "exe", "dll",
+        // 文档
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        // 音视频
+        "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "ogg",
+        // 数据库
+        "sqlite", "db",
+        // 其他
+        "bin", "dat", "class", "jar", "nib", "storyboardc",
+    ]
+
+    /// 是否为图片文件（基于扩展名判断）
+    public var isImage: Bool {
+        let ext = (file as NSString).pathExtension.lowercased()
+        return Self.imageExtensions.contains(ext)
+    }
+
+    /// 基于扩展名判断是否为二进制文件
+    public static func isBinaryByExtension(_ filePath: String) -> Bool {
+        let ext = (filePath as NSString).pathExtension.lowercased()
+        return binaryExtensions.contains(ext)
     }
 }
 
