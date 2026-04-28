@@ -639,11 +639,14 @@ extension LibGit2 {
                 filePath = String(cString: oldPath ?? newPath!)
             }
 
-            // 检测二进制文件：通过 libgit2 的 flags 判断
-            // GIT_DIFF_FLAG_BINARY = 2（libgit2 中 git_diff_flag_t 的定义）
+            // 检测二进制文件：双重检测策略
+            // 1. 通过 libgit2 的 flags 判断（对已跟踪文件的变更有效）
+            //    GIT_DIFF_FLAG_BINARY = 2
             let newFileFlags = delta.pointee.new_file.flags
             let oldFileFlags = delta.pointee.old_file.flags
-            let isBinary = (newFileFlags & 2) != 0 || (oldFileFlags & 2) != 0
+            let flagsBinary = (newFileFlags & 2) != 0 || (oldFileFlags & 2) != 0
+            // 2. 通过文件扩展名判断（对未跟踪文件等 flags 未标记的情况作为后备）
+            let isBinary = flagsBinary || GitDiffFile.isBinaryByExtension(filePath)
 
             // 获取 diff 内容
             var diffContent = ""
