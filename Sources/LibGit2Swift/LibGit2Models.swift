@@ -68,11 +68,27 @@ public struct GitDiffFile: Identifiable, Codable, Hashable {
     public let changeType: String
     public let diff: String
 
-    public init(id: String, file: String, changeType: String, diff: String) {
+    /// 是否为二进制文件（图片、字体、压缩包等）
+    public let isBinary: Bool
+
+    public init(id: String, file: String, changeType: String, diff: String, isBinary: Bool = false) {
         self.id = id
         self.file = file
         self.changeType = changeType
         self.diff = diff
+        self.isBinary = isBinary
+    }
+
+    /// 常见的图片文件扩展名
+    public static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif",
+        "ico", "icns", "webp", "svg", "heic", "heif", "avif",
+    ]
+
+    /// 是否为图片文件（基于扩展名判断）
+    public var isImage: Bool {
+        let ext = (file as NSString).pathExtension.lowercased()
+        return Self.imageExtensions.contains(ext)
     }
 }
 

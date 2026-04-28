@@ -330,6 +330,21 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件内容字符串
     public static func getFileContent(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> String {
+        let data = try getFileData(atCommit: commitHash, file: filePath, at: repoPath)
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw LibGit2Error.invalidValue
+        }
+        return content
+    }
+
+    /// 获取指定提交中文件的原始二进制数据
+    /// 支持二进制文件（图片、字体等），返回原始的 Data
+    /// - Parameters:
+    ///   - commitHash: 提交哈希
+    ///   - filePath: 文件路径
+    ///   - repoPath: 仓库路径
+    /// - Returns: 文件的原始二进制数据
+    public static func getFileData(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> Data {
         let repo = try openRepository(at: repoPath)
         defer { git_repository_free(repo) }
 
@@ -353,29 +368,26 @@ extension LibGit2 {
         }
 
         var treeEntry: OpaquePointer? = nil
+        guard git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry else {
+            throw LibGit2Error.invalidValue
+        }
+        defer { git_tree_entry_free(entry) }
 
-        if git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry {
-            defer { git_tree_entry_free(entry) }
+        var blob: OpaquePointer? = nil
+        let entryOid = git_tree_entry_id(entry)
+        guard git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob else {
+            throw LibGit2Error.invalidValue
+        }
+        defer { git_blob_free(blobPtr) }
 
-            var blob: OpaquePointer? = nil
-            defer { if blob != nil { git_blob_free(blob) } }
+        let contentPtr = git_blob_rawcontent(blobPtr)
+        let size = git_blob_rawsize(blobPtr)
 
-            let entryOid = git_tree_entry_id(entry)
-
-            if git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob {
-                let contentPtr = git_blob_rawcontent(blobPtr)
-                let size = git_blob_rawsize(blobPtr)
-
-                if let ptr = contentPtr {
-                    let data = Data(bytes: ptr, count: Int(size))
-                    if let content = String(data: data, encoding: .utf8) {
-                        return content
-                    }
-                }
-            }
+        guard let ptr = contentPtr else {
+            throw LibGit2Error.invalidValue
         }
 
-        throw LibGit2Error.invalidValue
+        return Data(bytes: ptr, count: Int(size))
     }
 
     /// 获取指定提交中文件变更的前后内容
@@ -627,6 +639,12 @@ extension LibGit2 {
                 filePath = String(cString: oldPath ?? newPath!)
             }
 
+            // 检测二进制文件：通过 libgit2 的 flags 判断
+            // GIT_DIFF_FLAG_BINARY = 2（libgit2 中 git_diff_flag_t 的定义）
+            let newFileFlags = delta.pointee.new_file.flags
+            let oldFileFlags = delta.pointee.old_file.flags
+            let isBinary = (newFileFlags & 2) != 0 || (oldFileFlags & 2) != 0
+
             // 获取 diff 内容
             var diffContent = ""
             var patch: OpaquePointer? = nil
@@ -645,7 +663,8 @@ extension LibGit2 {
                 id: filePath,
                 file: filePath,
                 changeType: changeType,
-                diff: diffContent
+                diff: diffContent,
+                isBinary: isBinary
             ))
         }
 
