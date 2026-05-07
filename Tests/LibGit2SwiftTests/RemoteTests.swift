@@ -760,6 +760,52 @@ final class RemoteTests: LibGit2SwiftTestCase {
         XCTAssertEqual(unpulledCount, 0, "Should return 0 when no upstream branch")
     }
 
+    func testPullFastForwardUpdatesWorkingTreeAndKeepsRepositoryClean() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibGit2SwiftPullTests")
+            .appendingPathComponent(UUID().uuidString)
+        let remoteURL = rootURL.appendingPathComponent("remote.git")
+        let seedURL = rootURL.appendingPathComponent("seed")
+        let localURL = rootURL.appendingPathComponent("local")
+
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        try runGit(["init", "--bare", remoteURL.path], in: rootURL)
+        try runGit(["init", "--initial-branch=main", seedURL.path], in: rootURL)
+        try runGit(["config", "user.name", "Test User"], in: seedURL)
+        try runGit(["config", "user.email", "test@example.com"], in: seedURL)
+
+        let trackedFileURL = seedURL.appendingPathComponent("README.md")
+        try "v1\n".write(to: trackedFileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: seedURL)
+        try runGit(["commit", "-m", "Initial commit"], in: seedURL)
+        try runGit(["remote", "add", "origin", remoteURL.path], in: seedURL)
+        try runGit(["push", "-u", "origin", "main"], in: seedURL)
+
+        try runGit(["clone", remoteURL.path, localURL.path], in: rootURL)
+
+        try "v2\n".write(to: trackedFileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: seedURL)
+        try runGit(["commit", "-m", "Update readme"], in: seedURL)
+        try runGit(["push", "origin", "main"], in: seedURL)
+
+        try LibGit2.pull(at: localURL.path, verbose: false)
+
+        let pulledContent = try String(contentsOf: localURL.appendingPathComponent("README.md"), encoding: .utf8)
+        XCTAssertEqual(pulledContent, "v2\n", "Fast-forward pull should update the working tree file contents")
+
+        let hasChanges = try LibGit2.hasUncommittedChanges(at: localURL.path, verbose: false)
+        XCTAssertFalse(hasChanges, "Fast-forward pull should keep the repository clean")
+
+        let porcelainStatus = try runGit(["status", "--porcelain"], in: localURL)
+        XCTAssertTrue(
+            porcelainStatus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "CLI status should remain clean after fast-forward pull, got: \(porcelainStatus)"
+        )
+    }
+
     /// 测试大量提交时的性能
     func testGetUnPushedCommitsWithLargeHistory() throws {
         // 创建大量提交来测试性能
@@ -871,5 +917,35 @@ final class RemoteTests: LibGit2SwiftTestCase {
             at: path,
             verbose: false
         )
+    }
+
+    @discardableResult
+    private func runGit(_ arguments: [String], in directory: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = directory
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            XCTFail("git \(arguments.joined(separator: " ")) failed: \(errorOutput)")
+            throw NSError(
+                domain: "LibGit2SwiftTests.GitCLI",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: errorOutput]
+            )
+        }
+
+        return output
     }
 }
