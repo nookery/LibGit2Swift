@@ -944,4 +944,87 @@ final class DiffTests: LibGit2SwiftTestCase {
             XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for invalid commit hash")
         }
     }
+
+    // MARK: - Diff File List Tests
+
+    func testGetDiffFileListWithNewFile() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 创建新文件（未跟踪）
+        try "New file".write(to: testRepo.tempDirectory.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+
+        // 获取工作区diff（应该包含未跟踪文件）
+        let diffFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: false)
+        XCTAssertTrue(diffFiles.contains { $0.file == "new.txt" }, "Should include untracked files")
+    }
+
+    func testGetDiffFileListEmptyRepository() throws {
+        // 空仓库的diff应该为空
+        let diffFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: false)
+        XCTAssertTrue(diffFiles.isEmpty, "Empty repo should have no diff")
+    }
+
+    func testGetDiffFileListStagedEmptyRepository() throws {
+        // 空仓库的staged diff也应该为空
+        let stagedDiff = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: true)
+        XCTAssertTrue(stagedDiff.isEmpty, "Empty repo should have no staged diff")
+    }
+
+    func testGetDiffFileListDeletedFile() throws {
+        // 创建文件并提交
+        try testRepo.createFileAndCommit(
+            fileName: "toDelete.txt",
+            content: "Will be deleted",
+            message: "Initial commit"
+        )
+
+        // 删除文件
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("toDelete.txt")
+        try FileManager.default.removeItem(at: fileURL)
+
+        // 工作区diff应该包含删除的文件
+        let diffFiles = try LibGit2.getDiffFileList(at: testRepo.repositoryPath, staged: false)
+        XCTAssertTrue(diffFiles.contains { $0.file == "toDelete.txt" && $0.changeType == "D" }, "Should show deleted file")
+    }
+
+    // MARK: - File Diff Tests
+
+    func testGetFileDiffStaged() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        // 修改并暂存
+        try "Modified".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+
+        // 获取文件详细diff
+        let fileDiff = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: true)
+        XCTAssertFalse(fileDiff.isEmpty, "File diff should not be empty")
+        XCTAssertTrue(fileDiff.contains("file.txt"), "Diff should mention the file")
+    }
+
+    func testGetFileDiffUnstaged() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        // 修改但不暂存
+        try "Modified".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+        // 获取文件详细diff
+        let fileDiff = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: false)
+        XCTAssertFalse(fileDiff.isEmpty, "File diff should not be empty")
+    }
 }

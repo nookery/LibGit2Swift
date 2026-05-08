@@ -275,4 +275,124 @@ final class BranchTests: LibGit2SwiftTestCase {
             XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for non-existent branch")
         }
     }
+
+    func testRenameNonExistentBranch() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 尝试重命名不存在的分支应该失败
+        XCTAssertThrowsError(try LibGit2.renameBranch(named: "nonexistent", to: "newname", at: testRepo.repositoryPath)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    func testRenameToExistingBranchName() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        // 创建两个分支
+        let branch1 = "branch1"
+        let branch2 = "branch2"
+        try LibGit2.createBranch(named: branch1, at: testRepo.repositoryPath)
+        try LibGit2.createBranch(named: branch2, at: testRepo.repositoryPath)
+
+        // 尝试将branch1重命名为branch2（已存在）应该失败
+        XCTAssertThrowsError(try LibGit2.renameBranch(named: branch1, to: branch2, at: testRepo.repositoryPath)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    func testBranchListWithMultipleCommits() throws {
+        // 创建多个提交
+        for i in 1...3 {
+            try testRepo.createFileAndCommit(
+                fileName: "file\(i).txt",
+                content: "Content \(i)",
+                message: "Commit \(i)"
+            )
+        }
+
+        let branches = try LibGit2.getBranchList(at: testRepo.repositoryPath, includeRemote: false)
+        XCTAssertGreaterThanOrEqual(branches.count, 1, "Should have at least one branch")
+
+        // 验证分支的最新提交信息
+        let branch = branches.first!
+        XCTAssertFalse(branch.latestCommitHash.isEmpty, "Latest commit hash should not be empty")
+        XCTAssertFalse(branch.latestCommitMessage.isEmpty, "Latest commit message should not be empty")
+    }
+
+    func testBranchUpstreamWithoutRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let branches = try LibGit2.getBranchList(at: testRepo.repositoryPath)
+        let branch = branches.first!
+
+        // 没有远程时，upstream应该为nil
+        XCTAssertNil(branch.upstream, "Upstream should be nil without remote")
+    }
+
+    func testSetBranchUpstream() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 添加远程仓库
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/test.git", at: testRepo.repositoryPath)
+
+        // 通过config设置分支上游
+        let currentBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: "branch.\(currentBranch).remote", value: "origin", at: testRepo.repositoryPath, verbose: false)
+        try LibGit2.setConfig(key: "branch.\(currentBranch).merge", value: "refs/heads/\(currentBranch)", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证配置已设置
+        let remote = try LibGit2.getConfig(key: "branch.\(currentBranch).remote", at: testRepo.repositoryPath, verbose: false)
+        XCTAssertEqual(remote, "origin", "Branch remote config should be set")
+    }
+
+    func testSetBranchUpstreamInvalidBranch() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 尝试为不存在的分支设置配置（config操作不检查分支是否存在）
+        // 这个测试验证config操作可以执行
+        try LibGit2.setConfig(key: "branch.nonexistent.remote", value: "origin", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证配置已设置（即使分支不存在）
+        XCTAssertNoThrow(try LibGit2.getConfig(key: "branch.nonexistent.remote", at: testRepo.repositoryPath, verbose: false))
+    }
+
+    func testGetBranchListIncludeRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取包含远程分支的列表
+        let allBranches = try LibGit2.getBranchList(at: testRepo.repositoryPath, includeRemote: true)
+
+        // 验证返回值不为nil
+        XCTAssertNotNil(allBranches, "Should return branch list")
+    }
 }

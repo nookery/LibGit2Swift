@@ -407,4 +407,141 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         XCTAssertTrue(commitsOnFeature.contains { $0.message == "Add feature" },
                       "Feature branch should contain feature commit")
     }
+
+    // MARK: - Checkout File Tests
+
+    func testCheckoutFile() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original content",
+            message: "Initial commit"
+        )
+
+        // 修改文件
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("file.txt")
+        try "Modified content".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // 检出文件（恢复到HEAD版本）
+        try LibGit2.checkoutFile("file.txt", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证文件已恢复
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertEqual(content, "Original content", "File should be restored to original")
+    }
+
+    func testCheckoutFileNewFile() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 创建新文件（未提交）
+        let newFileURL = testRepo.tempDirectory.appendingPathComponent("new.txt")
+        try "New".write(to: newFileURL, atomically: true, encoding: .utf8)
+
+        // 检出新文件（不存在于HEAD）
+        // checkoutFile不会抛出错误，只是跳过处理
+        XCTAssertNoThrow(try LibGit2.checkoutFile("new.txt", at: testRepo.repositoryPath, verbose: false))
+
+        // 验证新文件仍然存在（checkout不会删除未跟踪的文件）
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newFileURL.path))
+    }
+
+    func testCheckoutFileEmptyRepository() throws {
+        // 空仓库检出文件应该失败
+        XCTAssertThrowsError(try LibGit2.checkoutFile("file.txt", at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    // MARK: - Checkout Commit Tests
+
+    func testCheckoutCommitInvalidHash() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 检出到无效hash应该失败
+        XCTAssertThrowsError(try LibGit2.checkoutCommit("invalid_hash", at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    func testCheckoutCommitEmptyRepository() throws {
+        // 空仓库检出到提交应该失败
+        XCTAssertThrowsError(try LibGit2.checkoutCommit("abc123", at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    // MARK: - Checkout with Conflicts Tests
+
+    func testCheckoutBranchWithUncommittedChanges() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        // 创建分支
+        let branch2 = "branch2"
+        _ = try LibGit2.createBranch(named: branch2, at: testRepo.repositoryPath)
+
+        // 修改文件（未提交）
+        try "Modified".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+
+        // 切换分支（应该成功或警告有未提交变更）
+        // checkout with uncommitted changes可能会保留变更或抛出警告
+        XCTAssertNoThrow(try LibGit2.checkout(branch: branch2, at: testRepo.repositoryPath, verbose: false))
+    }
+
+    // MARK: - Checkout New Branch Tests
+
+    func testCheckoutNewBranchFromCurrent() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 创建并切换到新分支
+        let newBranch = "new-feature"
+        try LibGit2.checkoutNewBranch(named: newBranch, at: testRepo.repositoryPath, verbose: false)
+
+        // 验证当前分支
+        let current = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        XCTAssertEqual(current, newBranch)
+    }
+
+    func testCheckoutNewBranchDuplicateName() throws {
+        // 创建提交和分支
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let branchName = "existing"
+        _ = try LibGit2.createBranch(named: branchName, at: testRepo.repositoryPath)
+
+        // 尝试创建并切换到同名分支应该失败
+        XCTAssertThrowsError(try LibGit2.checkoutNewBranch(named: branchName, at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    func testCheckoutNewBranchEmptyRepository() throws {
+        // 空仓库创建新分支应该失败
+        XCTAssertThrowsError(try LibGit2.checkoutNewBranch(named: "newbranch", at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
 }

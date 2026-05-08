@@ -1,5 +1,6 @@
 import Foundation
 @testable import LibGit2Swift
+import Clibgit2
 import XCTest
 
 /// Repository 相关功能的测试
@@ -167,5 +168,110 @@ final class RepositoryTests: LibGit2SwiftTestCase {
 
         let rootPath = LibGit2.repositoryRoot(at: tempDir.path)
         XCTAssertNil(rootPath, "Repository root should be nil when outside Git repo")
+    }
+
+    // MARK: - Remote URL Tests
+
+    func testGetRemoteURLNoRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 没有远程仓库时，getRemoteURL应该返回nil
+        let url = LibGit2.getRemoteURL(at: testRepo.repositoryPath, remote: "origin")
+        XCTAssertNil(url, "Should return nil when remote doesn't exist")
+    }
+
+    func testGetRemoteURLWithRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 添加远程仓库
+        let remoteURL = "https://github.com/test/test.git"
+        try LibGit2.addRemote(name: "origin", url: remoteURL, at: testRepo.repositoryPath)
+
+        // 获取远程URL
+        let url = LibGit2.getRemoteURL(at: testRepo.repositoryPath, remote: "origin")
+        XCTAssertEqual(url, remoteURL, "Should return correct remote URL")
+    }
+
+    func testGetRemoteURLNonExistentRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 获取不存在远程的URL应该返回nil
+        let url = LibGit2.getRemoteURL(at: testRepo.repositoryPath, remote: "nonexistent")
+        XCTAssertNil(url, "Should return nil for non-existent remote")
+    }
+
+    func testSetRemoteURL() throws {
+        // 创建提交和远程
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let originalURL = "https://github.com/original/test.git"
+        try LibGit2.addRemote(name: "origin", url: originalURL, at: testRepo.repositoryPath)
+
+        // 设置新的URL
+        let newURL = "https://github.com/new/test.git"
+        try LibGit2.setRemoteURL(at: testRepo.repositoryPath, remote: "origin", url: newURL)
+
+        // 验证URL已更新
+        let updatedURL = LibGit2.getRemoteURL(at: testRepo.repositoryPath, remote: "origin")
+        XCTAssertEqual(updatedURL, newURL, "Remote URL should be updated")
+    }
+
+    func testSetRemoteURLNonExistentRemote() throws {
+        // 创建提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        // 设置不存在远程的URL - libgit2可能会创建配置而不是抛出错误
+        // 测试不崩溃即可
+        XCTAssertNoThrow(try LibGit2.setRemoteURL(at: testRepo.repositoryPath, remote: "nonexistent", url: "https://example.com"))
+    }
+
+    // MARK: - Repository Creation Tests
+
+    func testCreateRepositorySuccess() throws {
+        // 创建新仓库应该成功
+        let newRepoPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibGit2SwiftTests-NewRepo-\(UUID().uuidString)")
+            .path
+
+        try FileManager.default.createDirectory(atPath: newRepoPath, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(atPath: newRepoPath)
+        }
+
+        let repo = try LibGit2.createRepository(at: newRepoPath)
+        git_repository_free(repo)
+
+        // 验证仓库已创建
+        XCTAssertTrue(try LibGit2.isGitRepository(at: newRepoPath))
+    }
+
+    func testCreateRepositoryInvalidPath() throws {
+        // 尝试在无效路径创建仓库应该失败
+        XCTAssertThrowsError(try LibGit2.createRepository(at: "/nonexistent/path")) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
     }
 }

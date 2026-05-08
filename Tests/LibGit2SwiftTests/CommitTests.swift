@@ -562,4 +562,140 @@ final class CommitTests: LibGit2SwiftTestCase {
         // 验证：file2.txt 被删除（变更被丢弃）
         assertFileNotExists("file2.txt", in: testRepo)
     }
+
+    // MARK: - Amend Commit Tests
+
+    func testAmendCommit() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original content",
+            message: "Original message"
+        )
+
+        // 获取原始提交hash
+        let originalCommits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let originalHash = originalCommits[0].hash
+
+        // 修改文件并暂存（必须有变更才能amend）
+        try "Modified content".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+
+        // Amend提交（修改内容但不修改消息）
+        _ = try LibGit2.amendCommit(message: nil, at: testRepo.repositoryPath, verbose: false)
+
+        // 验证提交被修改
+        let amendedCommits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(amendedCommits.count, 1, "Should still have 1 commit")
+        XCTAssertNotEqual(amendedCommits[0].hash, originalHash, "Commit hash should change after amend")
+        XCTAssertEqual(amendedCommits[0].message, "Original message", "Message should remain unchanged")
+    }
+
+    func testAmendCommitWithNewMessage() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original content",
+            message: "Original message"
+        )
+
+        // 需要暂存变更才能amend
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+
+        // Amend提交，修改消息
+        let newMessage = "Amended message"
+        _ = try LibGit2.amendCommit(message: newMessage, at: testRepo.repositoryPath, verbose: false)
+
+        // 验证消息已修改
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits[0].message, newMessage, "Message should be updated")
+    }
+
+    func testAmendCommitWithContentAndMessage() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original",
+            message: "Original message"
+        )
+
+        // 修改文件内容
+        try "New content".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+
+        // Amend提交，同时修改内容和消息
+        let newMessage = "Updated content and message"
+        _ = try LibGit2.amendCommit(message: newMessage, at: testRepo.repositoryPath, verbose: false)
+
+        // 验证提交已修改
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits[0].message, newMessage, "Message should be updated")
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit")
+
+        // 验证文件内容
+        let content = try testRepo.readFile("file.txt")
+        XCTAssertEqual(content, "New content", "File content should be updated")
+    }
+
+    func testAmendCommitNoChanges() throws {
+        // 创建初始提交
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Original message"
+        )
+
+        // 暂存文件（确保index有内容）
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+
+        // Amend（即使内容相同也应该成功）
+        _ = try LibGit2.amendCommit(message: nil, at: testRepo.repositoryPath, verbose: false)
+
+        // 验证提交仍然存在
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit")
+    }
+
+    func testAmendCommitEmptyRepository() throws {
+        // 空仓库没有HEAD，amend应该失败
+        XCTAssertThrowsError(try LibGit2.amendCommit(message: "test", at: testRepo.repositoryPath, verbose: false)) { error in
+            XCTAssertTrue(error is LibGit2Error)
+        }
+    }
+
+    // MARK: - Add and Commit Tests
+
+    func testAddAndCommit() throws {
+        // 创建文件
+        try "Content".write(to: testRepo.tempDirectory.appendingPathComponent("newfile.txt"), atomically: true, encoding: .utf8)
+
+        // 使用addAndCommit一次性添加并提交
+        _ = try LibGit2.addAndCommit(files: ["newfile.txt"], message: "Add and commit", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证提交已创建
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1, "Should have 1 commit")
+        XCTAssertEqual(commits[0].message, "Add and commit")
+
+        // 验证文件已提交
+        assertFileExists("newfile.txt", in: testRepo)
+    }
+
+    func testAddAndCommitMultipleFiles() throws {
+        // 创建多个文件
+        for i in 1...3 {
+            try "Content \(i)".write(to: testRepo.tempDirectory.appendingPathComponent("file\(i).txt"), atomically: true, encoding: .utf8)
+        }
+
+        // 使用addAndCommit添加多个文件
+        _ = try LibGit2.addAndCommit(files: ["file1.txt", "file2.txt", "file3.txt"], message: "Add multiple files", at: testRepo.repositoryPath, verbose: false)
+
+        // 验证所有文件已提交
+        let commits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        XCTAssertEqual(commits.count, 1)
+
+        assertFileExists("file1.txt", in: testRepo)
+        assertFileExists("file2.txt", in: testRepo)
+        assertFileExists("file3.txt", in: testRepo)
+    }
 }
