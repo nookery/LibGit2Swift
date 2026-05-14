@@ -69,16 +69,8 @@ extension LibGit2 {
         }
 
         // 5. 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
-        var signature: UnsafeMutablePointer<git_signature>?
-        defer { if let sig = signature { git_signature_free(sig) } }
-
-        let signResult = git_signature_now(&signature, userName, userEmail)
-        if signResult != 0 {
-            // 如果配置失败，使用默认值
-            if verbose { os_log("⚠️ LibGit2: Failed to create signature, using defaults") }
-            git_signature_now(&signature, "GitOK User", "gitok@example.com")
-        }
+        let signature = try createSignature(at: path, verbose: verbose)
+        defer { git_signature_free(signature) }
 
         // 6. 创建提交
         var commitOID = git_oid()
@@ -163,48 +155,24 @@ extension LibGit2 {
             throw LibGit2Error.cannotWriteTree
         }
 
-        // 获取父提交的父提交（祖父母）
-        let parentCount = git_commit_parentcount(commit)
-        var parents = [OpaquePointer?]()
-        defer {
-            for parent in parents {
-                if parent != nil {
-                    git_commit_free(parent!)
-                }
-            }
-        }
-
-        for i in 0 ..< parentCount {
-            var parent: OpaquePointer?
-            if git_commit_parent(&parent, commit, i) == 0 {
-                parents.append(parent)
-            }
-        }
-
         // 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
-        var signature: UnsafeMutablePointer<git_signature>?
-        defer { if let sig = signature { git_signature_free(sig) } }
-        git_signature_now(&signature, userName, userEmail)
+        let signature = try createSignature(at: path, verbose: verbose)
+        defer { git_signature_free(signature) }
 
-        // 创建新提交
+        // 修改当前 HEAD 提交
         var newCommitOID = git_oid()
         let messageToUpdate = message ?? String(cString: git_commit_message(commit))
 
-        let result = parents.withUnsafeMutableBufferPointer { buffer in
-            git_commit_create(
-                &newCommitOID,
-                repo,
-                "HEAD",
-                signature,
-                signature,
-                nil,
-                messageToUpdate,
-                tree,
-                buffer.count,
-                buffer.baseAddress
-            )
-        }
+        let result = git_commit_amend(
+            &newCommitOID,
+            commit,
+            "HEAD",
+            nil,
+            signature,
+            nil,
+            messageToUpdate,
+            tree
+        )
 
         if result != 0 {
             throw LibGit2Error.commitFailed

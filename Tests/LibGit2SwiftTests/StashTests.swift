@@ -91,7 +91,7 @@ final class StashTests: LibGit2SwiftTestCase {
         try "Modified 2".write(to: testRepo.tempDirectory.appendingPathComponent("file1.txt"), atomically: true, encoding: .utf8)
         let secondIndex = try LibGit2.stash(message: "Second change", at: testRepo.repositoryPath, verbose: false)
 
-        XCTAssertEqual(secondIndex, 1, "Second stash should have index 1")
+        XCTAssertEqual(secondIndex, 0, "Newest stash should have index 0")
 
         // 验证暂存数量
         let count = try LibGit2.getStashCount(at: testRepo.repositoryPath)
@@ -137,12 +137,12 @@ final class StashTests: LibGit2SwiftTestCase {
         try "Change 2".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
         _ = try LibGit2.stash(message: "Stash 2", at: testRepo.repositoryPath, verbose: false)
 
-        // 恢复第一个暂存(index 0)
+        // 恢复最新的暂存(index 0)
         try LibGit2.stashPop(index: 0, at: testRepo.repositoryPath, verbose: false)
 
-        // 验证恢复的是第一个变更
+        // 验证恢复的是最新的变更
         let content = try testRepo.readFile("file.txt")
-        XCTAssertEqual(content, "Change 1")
+        XCTAssertEqual(content, "Change 2")
 
         // 验证剩下一个暂存
         XCTAssertEqual(try LibGit2.getStashCount(at: testRepo.repositoryPath), 1)
@@ -187,12 +187,12 @@ final class StashTests: LibGit2SwiftTestCase {
         try "Change 2".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
         _ = try LibGit2.stash(message: "Stash 2", at: testRepo.repositoryPath, verbose: false)
 
-        // 应用第二个暂存(index 1)
+        // 应用较早的暂存(index 1)
         try LibGit2.stashApply(index: 1, at: testRepo.repositoryPath, verbose: false)
 
-        // 验证恢复的是第二个变更
+        // 验证恢复的是较早的变更
         let content = try testRepo.readFile("file.txt")
-        XCTAssertEqual(content, "Change 2")
+        XCTAssertEqual(content, "Change 1")
 
         // 验证暂存列表不变
         XCTAssertEqual(try LibGit2.getStashCount(at: testRepo.repositoryPath), 2)

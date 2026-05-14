@@ -43,21 +43,27 @@ public class LibGit2: SuperLog {
 
         var repo: OpaquePointer?
         var config: OpaquePointer?
+        var localConfig: OpaquePointer?
         var snapshot: OpaquePointer?
         var outPtr: UnsafePointer<CChar>?
 
         defer {
             if snapshot != nil { git_config_free(snapshot) }
+            if localConfig != nil { git_config_free(localConfig) }
             if config != nil { git_config_free(config) }
             if repo != nil { git_repository_free(repo) }
         }
 
-        // 1. 尝试通过仓库获取配置
         let openResult = git_repository_open(&repo, repoPath)
         if openResult == 0, let repository = repo {
             if git_repository_config(&config, repository) == 0, let configuration = config {
+                guard git_config_open_level(&localConfig, configuration, GIT_CONFIG_LEVEL_LOCAL) == 0,
+                      let localConfiguration = localConfig else {
+                    throw LibGit2Error.configKeyNotFound(key)
+                }
+
                 // 在 libgit2 1.x 中，获取字符串必须在 snapshot 上操作
-                if git_config_snapshot(&snapshot, configuration) == 0, let configSnapshot = snapshot {
+                if git_config_snapshot(&snapshot, localConfiguration) == 0, let configSnapshot = snapshot {
                     let getResult = git_config_get_string(&outPtr, configSnapshot, key)
                     if getResult == 0, let cString = outPtr {
                         let value = String(cString: cString)
@@ -65,30 +71,11 @@ public class LibGit2: SuperLog {
                         return value
                     }
                     if verbose { os_log("\(LibGit2.t)Key not found in repo snapshot, code: \(getResult)") }
-                    // 清理 snapshot 以便后面 fallback 使用
-                    git_config_free(snapshot)
-                    snapshot = nil
                 }
             }
         } else {
-            if verbose { os_log("\(LibGit2.t)Could not open repo at \(repoPath), trying default config") }
-        }
-
-        // 2. Fallback: 直接读取默认全局配置
-        if verbose { os_log("\(LibGit2.t)Attempting fallback to default (global) config for key: \(key)") }
-        var defaultConfig: OpaquePointer?
-        defer { if defaultConfig != nil { git_config_free(defaultConfig) } }
-
-        if git_config_open_default(&defaultConfig) == 0, let configuration = defaultConfig {
-            if git_config_snapshot(&snapshot, configuration) == 0, let configSnapshot = snapshot {
-                let getResult = git_config_get_string(&outPtr, configSnapshot, key)
-                if getResult == 0, let cString = outPtr {
-                    let value = String(cString: cString)
-                    if verbose { os_log("\(LibGit2.t)Config found in default/global config: \(key) = \(value)") }
-                    return value
-                }
-                if verbose { os_log("\(LibGit2.t)Key not found in default snapshot: \(lastError())") }
-            }
+            if verbose { os_log("\(LibGit2.t)Could not open repo at \(repoPath)") }
+            throw LibGit2Error.repositoryNotFound(repoPath)
         }
 
         throw LibGit2Error.configKeyNotFound(key)
@@ -141,6 +128,24 @@ public class LibGit2: SuperLog {
         let name = try getConfig(key: "user.name", at: repoPath, verbose: verbose)
         let email = try getConfig(key: "user.email", at: repoPath, verbose: verbose)
         return (name, email)
+    }
+
+    static func createSignature(at repoPath: String, verbose: Bool) throws -> UnsafeMutablePointer<git_signature> {
+        let userConfig = try? getUserConfig(at: repoPath, verbose: verbose)
+        let name = userConfig?.name ?? "GitOK User"
+        let email = userConfig?.email ?? "gitok@example.com"
+
+        var signature: UnsafeMutablePointer<git_signature>?
+        if git_signature_now(&signature, name, email) != 0 || signature == nil {
+            if verbose { os_log("\(LibGit2.t)Failed to create configured signature, using defaults") }
+            git_signature_now(&signature, "GitOK User", "gitok@example.com")
+        }
+
+        guard let signature else {
+            throw LibGit2Error.commitFailed
+        }
+
+        return signature
     }
 
     /// 设置用户配置

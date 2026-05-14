@@ -149,36 +149,26 @@ extension LibGit2 {
     static func resetToCommitKeepingFiles(_ commitHash: String, keeping paths: [String], mode resetMode: String, at repoPath: String, verbose: Bool = true) throws {
         if verbose { os_log("🐚 LibGit2: Resetting to %{public}@ keeping files", commitHash) }
 
-        let repo = try openRepository(at: repoPath)
-        defer { git_repository_free(repo) }
-
-        var targetOID = git_oid()
-        guard git_oid_fromstr(&targetOID, commitHash) == 0 else {
-            throw LibGit2Error.invalidValue
+        let repoURL = URL(fileURLWithPath: repoPath, isDirectory: true)
+        let keptFiles = try paths.map { path -> (path: String, data: Data?) in
+            let fileURL = repoURL.appendingPathComponent(path)
+            return (path, FileManager.default.fileExists(atPath: fileURL.path) ? try Data(contentsOf: fileURL) : nil)
         }
 
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
+        try reset(to: commitHash, mode: resetMode, at: repoPath, verbose: verbose)
 
-        guard git_commit_lookup(&commit, repo, &targetOID) == 0,
-              let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
+        for keptFile in keptFiles {
+            let fileURL = repoURL.appendingPathComponent(keptFile.path)
 
-        var stringPointers: [UnsafeMutablePointer<CChar>?] = paths.map { strdup($0) }
-        defer {
-            for ptr in stringPointers {
-                free(ptr)
+            if let data = keptFile.data {
+                try FileManager.default.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: fileURL)
+            } else if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
             }
-        }
-
-        let result = stringPointers.withUnsafeMutableBufferPointer { buffer -> Int32 in
-            var strarray = git_strarray(strings: buffer.baseAddress, count: buffer.count)
-            return git_reset_default(repo, commitPtr, &strarray)
-        }
-
-        if result != 0 {
-            throw LibGit2Error.checkoutFailed(commitHash)
         }
 
         if verbose { os_log("🐚 LibGit2: Reset completed keeping specified files") }

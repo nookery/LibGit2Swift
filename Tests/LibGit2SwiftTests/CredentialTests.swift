@@ -164,6 +164,23 @@ final class CredentialTests: LibGit2SwiftTestCase {
 
         // 删除匹配的所有项
         SecItemDelete(query as CFDictionary)
+
+        var serverOnlyQuery = query
+        serverOnlyQuery.removeValue(forKey: kSecAttrProtocol as String)
+        SecItemDelete(serverOnlyQuery as CFDictionary)
+    }
+
+    private func hasUsableDefaultSSHKey() -> Bool {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        let sshDir = homeDir + "/.ssh"
+        let keyTypes = ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]
+
+        return keyTypes.contains { keyType in
+            let keyPath = "\(sshDir)/\(keyType)"
+            let publicKeyPath = "\(keyPath).pub"
+            return FileManager.default.fileExists(atPath: keyPath) &&
+                FileManager.default.fileExists(atPath: publicKeyPath)
+        }
     }
 }
 
@@ -369,6 +386,37 @@ extension CredentialTests {
             XCTAssertEqual(result, Int32(GIT_EUSER.rawValue), "Should fail without SSH keys")
             os_log("ℹ️ SSH credential callback test passed (no keys available, as expected)")
         }
+    }
+
+    /// SSH-only callbacks should not require a Keychain username/password.
+    func testSSHCredentialCallbackUsesKeyFileWithoutKeychainCredential() throws {
+        try XCTSkipIf(isRunningInCI(), "SSH callback tests skipped in CI environment")
+
+        let sshURL = "ssh://git@credential-callback-no-keychain.invalid:2014/test/repo.git"
+        deleteKeychainCredential(for: sshURL)
+
+        guard hasUsableDefaultSSHKey() else {
+            throw XCTSkip("No unencrypted default SSH key found for testing")
+        }
+
+        let urlPointer = (sshURL as NSString).utf8String
+        var credentialPtr: UnsafeMutablePointer<git_credential>?
+
+        let result = withUnsafeMutablePointer(to: &credentialPtr) { ptr in
+            gitCredentialCallback(
+                ptr,
+                urlPointer,
+                ("git" as NSString).utf8String,
+                GIT_CREDENTIAL_SSH_KEY.rawValue,
+                nil
+            )
+        }
+
+        if let cred = credentialPtr {
+            git_credential_free(cred)
+        }
+
+        XCTAssertEqual(result, 0, "SSH key auth should not require a Keychain username/password")
     }
 
     /// 测试 SSH 凭据回调（SSH Agent 认证）

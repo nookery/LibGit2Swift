@@ -302,10 +302,8 @@ extension LibGit2 {
         }
 
         // 创建签名
-        let (userName, userEmail) = try getUserConfig(at: path, verbose: verbose)
-        var signature: UnsafeMutablePointer<git_signature>? = nil
-        defer { if let sig = signature { git_signature_free(sig) } }
-        git_signature_now(&signature, userName, userEmail)
+        let signature = try createSignature(at: path, verbose: verbose)
+        defer { git_signature_free(signature) }
 
         // 构建合并提交信息
         let message = "Merge branch '\(branchName)'"

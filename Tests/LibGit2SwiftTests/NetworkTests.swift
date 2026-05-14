@@ -184,6 +184,6 @@ final class NetworkTests: LibGit2SwiftTestCase {
 
         // 克隆到已存在的目录 - libgit2可能允许或在目录内创建.git
         // 测试不崩溃即可
-        XCTAssertNoThrow(try LibGit2.clone(url: remotePath, to: existingDir.path, verbose: false))
+        XCTAssertNoThrow(try LibGit2.clone(url: remotePath, to: existingDir.path))
     }
 }

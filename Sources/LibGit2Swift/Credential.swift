@@ -189,32 +189,6 @@ public let gitCredentialCallback: @convention(c) (
         return Int32(GIT_EUSER.rawValue)
     }
 
-    guard let (username, password) = CredentialManager.getCredential(for: urlString, verbose: CredentialManager.verboseCredentialCallback) else {
-        return Int32(GIT_EUSER.rawValue)
-    }
-
-    // 检查用户名和密码是否为空
-    guard !username.isEmpty && !password.isEmpty else {
-        return Int32(GIT_EUSER.rawValue)
-    }
-
-    // 根据allowed_types选择合适的凭据类型
-    if allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 {
-        // 创建凭证对象
-        // git_credential_userpass_plaintext_new 会使用 strdup 在内部复制字符串
-        let result = username.withCString { usernamePtr in
-            password.withCString { passwordPtr in
-                git_credential_userpass_plaintext_new(outPointer, usernamePtr, passwordPtr)
-            }
-        }
-
-        if result == 0 {
-            return 0
-        } else {
-            return Int32(GIT_EUSER.rawValue)
-        }
-    }
-
     // 尝试使用文件密钥（SSH KEY 认证）
     if allowed_types & GIT_CREDENTIAL_SSH_KEY.rawValue != 0 {
         // SSH 密钥认证
@@ -257,6 +231,29 @@ public let gitCredentialCallback: @convention(c) (
                 }
                 return 0
             }
+        }
+    }
+
+    // 根据allowed_types选择合适的凭据类型
+    if allowed_types & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 {
+        guard let (username, password) = CredentialManager.getCredential(for: urlString, verbose: CredentialManager.verboseCredentialCallback),
+              !username.isEmpty,
+              !password.isEmpty else {
+            return Int32(GIT_EUSER.rawValue)
+        }
+
+        // 创建凭证对象
+        // git_credential_userpass_plaintext_new 会使用 strdup 在内部复制字符串
+        let result = username.withCString { usernamePtr in
+            password.withCString { passwordPtr in
+                git_credential_userpass_plaintext_new(outPointer, usernamePtr, passwordPtr)
+            }
+        }
+
+        if result == 0 {
+            return 0
+        } else {
+            return Int32(GIT_EUSER.rawValue)
         }
     }
 

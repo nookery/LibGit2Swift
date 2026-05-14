@@ -2,6 +2,10 @@ import Foundation
 import Clibgit2
 import OSLog
 
+private final class StashListPayload {
+    var stashes: [(index: Int, message: String, commitHash: String)] = []
+}
+
 /// LibGit2 暂存操作扩展
 extension LibGit2 {
     /// 暂存当前变更
@@ -16,37 +20,32 @@ extension LibGit2 {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
-        // 检查是否有变更
-        if !(try hasUncommittedChanges(at: path)) {
-            if verbose { os_log("🐚 LibGit2: No changes to stash") }
-            return -1
-        }
-
         // 创建签名
-        let (configName, configEmail) = try getUserConfig(at: path, verbose: verbose)
-        var signature: UnsafeMutablePointer<git_signature>? = nil
-        defer { if let sig = signature { git_signature_free(sig) } }
-        git_signature_now(&signature, configName, configEmail)
+        let signature = try createSignature(at: path, verbose: verbose)
+        defer { git_signature_free(signature) }
 
         var commitOID = git_oid()
 
-        let result: Int32
-        if let message = message {
-            result = git_stash_save(&commitOID, repo, signature, message, 0)
-        } else {
-            result = git_stash_save(&commitOID, repo, signature, "WIP", 0)
+        let result = git_stash_save(
+            &commitOID,
+            repo,
+            signature,
+            message ?? "WIP",
+            UInt32(GIT_STASH_INCLUDE_UNTRACKED.rawValue)
+        )
+
+        if result == GIT_ENOTFOUND.rawValue {
+            if verbose { os_log("🐚 LibGit2: No changes to stash") }
+            return -1
         }
 
         if result != 0 {
             throw LibGit2Error.commitFailed
         }
 
-        // 获取 stash 索引
-        let stashIndex = try getStashCount(at: path) - 1
+        if verbose { os_log("🐚 LibGit2: Changes stashed at index: 0") }
 
-        if verbose { os_log("🐚 LibGit2: Changes stashed at index: %d", stashIndex) }
-
-        return stashIndex
+        return 0
     }
 
     /// 恢复暂存的变更
@@ -104,44 +103,25 @@ extension LibGit2 {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
-        var referenceIterator: UnsafeMutablePointer<git_reference_iterator>? = nil
-        defer {
-            if let it = referenceIterator {
-                git_reference_iterator_free(it)
-            }
+        let payload = StashListPayload()
+        let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
+
+        let result = git_stash_foreach(repo, { index, message, stashID, payload in
+            guard let payload else { return -1 }
+
+            let box = Unmanaged<StashListPayload>.fromOpaque(payload).takeUnretainedValue()
+            let stashMessage = message.map { String(cString: $0) } ?? ""
+            let shortMessage = stashMessage.components(separatedBy: "\n").first ?? stashMessage
+            let commitHash = stashID.map { LibGit2.oidToString($0.pointee) } ?? ""
+            box.stashes.append((index: Int(index), message: shortMessage, commitHash: commitHash))
+            return 0
+        }, payloadPointer)
+
+        if result != 0 {
+            throw LibGit2Error.commitFailed
         }
 
-        var stashes: [(index: Int, message: String, commitHash: String)] = []
-        var index = 0
-
-        if git_reference_iterator_new(&referenceIterator, repo) == 0, let iterator = referenceIterator {
-            var reference: OpaquePointer? = nil
-            while git_reference_next(&reference, iterator) == 0, let ref = reference {
-                let name = git_reference_name(ref)
-
-                if let namePtr = name, String(cString: namePtr).hasPrefix("refs/stash") {
-                    defer { git_reference_free(ref) }
-
-                    var commitOID = git_oid()
-                    if git_reference_name_to_id(&commitOID, repo, String(cString: namePtr)) == 0 {
-                        var commit: OpaquePointer? = nil
-                        defer { if commit != nil { git_commit_free(commit) } }
-
-                        if git_commit_lookup(&commit, repo, &commitOID) == 0, let commitPtr = commit {
-                            let messagePtr = git_commit_message(commitPtr)
-                            let message = messagePtr != nil ? String(cString: messagePtr!) : ""
-                            let shortMessage = message.components(separatedBy: "\n").first ?? message
-                            let commitHash = oidToString(commitOID)
-
-                            stashes.append((index: index, message: shortMessage, commitHash: commitHash))
-                            index += 1
-                        }
-                    }
-                }
-            }
-        }
-
-        return stashes
+        return payload.stashes
     }
 
     /// 删除暂存
