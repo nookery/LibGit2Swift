@@ -217,6 +217,28 @@ public struct GitBranchCompare: Codable, Hashable, Sendable {
     }
 }
 
+/// Git submodule summary.
+public struct GitSubmoduleInfo: Codable, Hashable, Sendable {
+    public enum Status: String, Codable, Hashable, Sendable {
+        case initialized
+        case uninitialized
+        case modified
+        case conflicted
+    }
+
+    public let path: String
+    public let commitHash: String
+    public let status: Status
+    public let description: String?
+
+    public init(path: String, commitHash: String, status: Status, description: String? = nil) {
+        self.path = path
+        self.commitHash = commitHash
+        self.status = status
+        self.description = description
+    }
+}
+
 /// Patch application mode for index-only hunk staging operations.
 public enum GitPatchApplyMode: Codable, Hashable, Sendable {
     case stage

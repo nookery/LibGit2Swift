@@ -112,7 +112,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - staged: 是否获取已暂存的变更
     /// - Returns: 差异内容字符串
-    public static func getFileDiff(for file: String, at path: String, staged: Bool = false) throws -> String {
+    public static func getFileDiff(for file: String, at path: String, staged: Bool = false, ignoreWhitespace: Bool = false) throws -> String {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
@@ -146,6 +146,9 @@ extension LibGit2 {
             if tree != nil {
                 var diffOpts = git_diff_options()
                 git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+                if ignoreWhitespace {
+                    diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
+                }
                 let filePathCStr = strdup(file)
                 var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
                 strings.withUnsafeMutableBufferPointer { buffer in
@@ -177,6 +180,9 @@ extension LibGit2 {
             }
             diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
                             GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+            if ignoreWhitespace {
+                diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
+            }
 
             defer {
                 free(filePathCStr)
