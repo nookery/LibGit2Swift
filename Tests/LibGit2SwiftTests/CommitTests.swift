@@ -102,6 +102,126 @@ final class CommitTests: LibGit2SwiftTestCase {
         XCTAssertTrue(page.isEmpty, "Page beyond available commits should be empty")
     }
 
+    func testGetCommitGraphListIncludesCommitsOutsideCurrentHead() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        let featureBranch = "feature-graph"
+        _ = try LibGit2.createBranch(named: featureBranch, at: testRepo.repositoryPath)
+        try LibGit2.checkout(branch: featureBranch, at: testRepo.repositoryPath, verbose: false)
+        try testRepo.createFileAndCommit(
+            fileName: "feature.txt",
+            content: "Feature content",
+            message: "Feature graph commit"
+        )
+
+        try LibGit2.checkout(branch: "main", at: testRepo.repositoryPath, verbose: false)
+        try testRepo.createFileAndCommit(
+            fileName: "main.txt",
+            content: "Main content",
+            message: "Main graph commit"
+        )
+
+        let headCommits = try LibGit2.getCommitList(at: testRepo.repositoryPath)
+        let graphCommits = try LibGit2.getCommitGraphList(at: testRepo.repositoryPath)
+
+        XCTAssertFalse(
+            headCommits.contains { $0.message == "Feature graph commit" },
+            "HEAD history should not include commits reachable only from another branch"
+        )
+        XCTAssertTrue(
+            graphCommits.contains { $0.message == "Feature graph commit" },
+            "Graph history should include commits reachable from all branch refs"
+        )
+        XCTAssertTrue(
+            graphCommits.contains { $0.refs.contains("refs/heads/\(featureBranch)") },
+            "Graph commits should include branch refs for UI decoration"
+        )
+    }
+
+    func testGetCommitGraphListIncludesAnnotatedTagReference() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "tagged.txt",
+            content: "Tagged content",
+            message: "Tagged graph commit"
+        )
+
+        let taggedCommit = try XCTUnwrap(LibGit2.getCommitList(at: testRepo.repositoryPath).first)
+        try LibGit2.createTag(
+            named: "v-graph-annotated",
+            message: "Annotated graph tag",
+            at: taggedCommit.hash,
+            in: testRepo.repositoryPath,
+            verbose: false
+        )
+
+        let graphCommits = try LibGit2.getCommitGraphList(at: testRepo.repositoryPath)
+        let graphCommit = try XCTUnwrap(graphCommits.first { $0.hash == taggedCommit.hash })
+
+        XCTAssertTrue(graphCommit.refs.contains("refs/tags/v-graph-annotated"))
+        XCTAssertTrue(graphCommit.tags.contains("v-graph-annotated"))
+    }
+
+    func testGetCommitGraphListPreservesTopologicalOrder() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial content",
+            message: "Initial commit"
+        )
+
+        let featureBranch = "feature-topology"
+        _ = try LibGit2.createBranch(named: featureBranch, at: testRepo.repositoryPath)
+        try LibGit2.checkout(branch: featureBranch, at: testRepo.repositoryPath, verbose: false)
+        try testRepo.createFileAndCommit(
+            fileName: "feature.txt",
+            content: "Feature content",
+            message: "Feature topology commit"
+        )
+
+        try LibGit2.checkout(branch: "main", at: testRepo.repositoryPath, verbose: false)
+        try testRepo.createFileAndCommit(
+            fileName: "main.txt",
+            content: "Main content",
+            message: "Main topology commit"
+        )
+
+        let graphCommits = try LibGit2.getCommitGraphList(at: testRepo.repositoryPath)
+        let indexByHash = Dictionary(uniqueKeysWithValues: graphCommits.enumerated().map { ($0.element.hash, $0.offset) })
+
+        for commit in graphCommits {
+            let commitIndex = try XCTUnwrap(indexByHash[commit.hash])
+            for parentHash in commit.parentHashes {
+                if let parentIndex = indexByHash[parentHash] {
+                    XCTAssertLessThan(
+                        commitIndex,
+                        parentIndex,
+                        "Child commits must appear before their parents in graph history"
+                    )
+                }
+            }
+        }
+    }
+
+    func testGetCommitGraphListWithPagination() throws {
+        for i in 1...8 {
+            try testRepo.createFileAndCommit(
+                fileName: "graph-page-\(i).txt",
+                content: "Content \(i)",
+                message: "Graph page commit \(i)"
+            )
+        }
+
+        let page1 = try LibGit2.getCommitGraphListWithPagination(at: testRepo.repositoryPath, page: 0, size: 3)
+        let page2 = try LibGit2.getCommitGraphListWithPagination(at: testRepo.repositoryPath, page: 1, size: 3)
+
+        XCTAssertEqual(page1.count, 3)
+        XCTAssertEqual(page2.count, 3)
+        XCTAssertTrue(Set(page1.map(\.hash)).intersection(Set(page2.map(\.hash))).isEmpty)
+    }
+
     // MARK: - Commit Detail Tests
 
     func testGetCommitDetail() throws {
