@@ -101,6 +101,58 @@ final class NetworkTests: LibGit2SwiftTestCase {
         }
     }
 
+    func testPublishAndDeleteRemoteBranchToLocalBareRepository() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let bareRemoteURL = try createBareRepository()
+        try LibGit2.addRemote(name: "origin", url: bareRemoteURL.path, at: testRepo.repositoryPath)
+
+        let currentBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        try LibGit2.publishBranch(
+            localBranch: currentBranch,
+            remote: "origin",
+            remoteBranch: "published",
+            at: testRepo.repositoryPath,
+            verbose: false
+        )
+
+        XCTAssertTrue(remoteReferenceExists("refs/heads/published", in: bareRemoteURL))
+        XCTAssertEqual(
+            try LibGit2.getConfig(key: "branch.\(currentBranch).remote", at: testRepo.repositoryPath, verbose: false),
+            "origin"
+        )
+        XCTAssertEqual(
+            try LibGit2.getConfig(key: "branch.\(currentBranch).merge", at: testRepo.repositoryPath, verbose: false),
+            "refs/heads/published"
+        )
+
+        try LibGit2.deleteRemoteBranch(named: "origin/published", remote: "origin", at: testRepo.repositoryPath, verbose: false)
+        XCTAssertFalse(remoteReferenceExists("refs/heads/published", in: bareRemoteURL))
+    }
+
+    func testPushAndDeleteRemoteTagToLocalBareRepository() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        try LibGit2.createTag(named: "v-test", in: testRepo.repositoryPath, verbose: false)
+
+        let bareRemoteURL = try createBareRepository()
+        try LibGit2.addRemote(name: "origin", url: bareRemoteURL.path, at: testRepo.repositoryPath)
+
+        try LibGit2.pushTag(named: "v-test", remote: "origin", at: testRepo.repositoryPath, verbose: false)
+        XCTAssertTrue(remoteReferenceExists("refs/tags/v-test", in: bareRemoteURL))
+
+        try LibGit2.deleteRemoteTag(named: "v-test", remote: "origin", at: testRepo.repositoryPath, verbose: false)
+        XCTAssertFalse(remoteReferenceExists("refs/tags/v-test", in: bareRemoteURL))
+    }
+
     func testPullWithRemoteNotFound() throws {
         // 创建提交
         try testRepo.createFileAndCommit(
@@ -185,5 +237,33 @@ final class NetworkTests: LibGit2SwiftTestCase {
         // 克隆到已存在的目录 - libgit2可能允许或在目录内创建.git
         // 测试不崩溃即可
         XCTAssertNoThrow(try LibGit2.clone(url: remotePath, to: existingDir.path))
+    }
+
+    private func createBareRepository() throws -> URL {
+        let remoteURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibGit2SwiftTests-BareRemote-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: remoteURL, withIntermediateDirectories: true)
+
+        var repo: OpaquePointer?
+        let result = git_repository_init(&repo, remoteURL.path, 1)
+        guard result == 0, let repo else {
+            throw LibGit2Error.invalidRepository
+        }
+        git_repository_free(repo)
+        return remoteURL
+    }
+
+    private func remoteReferenceExists(_ referenceName: String, in remoteURL: URL) -> Bool {
+        guard let repo = try? LibGit2.openRepository(at: remoteURL.path) else {
+            return false
+        }
+        defer { git_repository_free(repo) }
+
+        var reference: OpaquePointer?
+        let result = git_reference_lookup(&reference, repo, referenceName)
+        if reference != nil {
+            git_reference_free(reference)
+        }
+        return result == 0
     }
 }

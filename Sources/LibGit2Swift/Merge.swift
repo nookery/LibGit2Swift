@@ -206,7 +206,7 @@ extension LibGit2 {
 
     /// 中止合并
     /// - Parameter path: 仓库路径
-    static func abortMerge(at path: String, verbose: Bool = true) throws {
+    public static func abortMerge(at path: String, verbose: Bool = true) throws {
         if verbose { os_log("\(self.t)Aborting merge") }
 
         let repo = try openRepository(at: path)
@@ -233,8 +233,12 @@ extension LibGit2 {
     /// - Parameters:
     ///   - branchName: 分支名称
     ///   - path: 仓库路径
-    static func continueMerge(branchName: String, at path: String, verbose: Bool) throws {
+    public static func continueMerge(branchName: String, at path: String, verbose: Bool = true) throws {
         if verbose { os_log("\(self.t)Continuing merge") }
+
+        if try hasMergeConflicts(at: path) {
+            throw LibGit2Error.mergeConflict
+        }
 
         // 创建合并提交
         try createMergeCommit(branchName: branchName, at: path, verbose: verbose)
@@ -251,7 +255,7 @@ extension LibGit2 {
     // MARK: - 私有辅助方法
 
     /// 创建合并提交
-    private static func createMergeCommit(branchName: String, at path: String, verbose: Bool) throws {
+    static func createMergeCommit(branchName: String, at path: String, verbose: Bool) throws {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 

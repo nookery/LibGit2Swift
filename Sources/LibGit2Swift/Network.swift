@@ -76,8 +76,102 @@ extension LibGit2 {
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
     public static func push(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
+        // 获取当前分支名
+        let branchName: String
+        if let branch = branch {
+            branchName = branch
+        } else {
+            branchName = try getCurrentBranch(at: path)
+        }
+
+        // 构建 refspec
+        let refspec = "refs/heads/\(branchName):refs/heads/\(branchName)"
+        try pushRefspecs([refspec], at: path, remote: remote, verbose: verbose)
+    }
+
+    /// 推送本地分支到远程分支，并可选择写入 upstream 配置。
+    public static func publishBranch(
+        localBranch: String,
+        remote: String = "origin",
+        remoteBranch: String? = nil,
+        at path: String,
+        setUpstream: Bool = true,
+        verbose: Bool = true
+    ) throws {
+        let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemoteBranch = remoteBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedLocalBranch.isEmpty == false, trimmedRemote.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let destinationBranch = (trimmedRemoteBranch?.isEmpty == false ? trimmedRemoteBranch : nil) ?? trimmedLocalBranch
+        let refspec = "refs/heads/\(trimmedLocalBranch):refs/heads/\(destinationBranch)"
+        try pushRefspecs([refspec], at: path, remote: trimmedRemote, verbose: verbose)
+
+        if setUpstream {
+            try setConfig(key: "branch.\(trimmedLocalBranch).remote", value: trimmedRemote, at: path, verbose: false)
+            try setConfig(key: "branch.\(trimmedLocalBranch).merge", value: "refs/heads/\(destinationBranch)", at: path, verbose: false)
+        }
+    }
+
+    /// 删除远程分支，等价于 `git push <remote> --delete <branch>`。
+    public static func deleteRemoteBranch(named branchName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
+        let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedName.isEmpty == false, trimmedRemote.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let shortBranchName = trimmedName.hasPrefix(trimmedRemote + "/")
+            ? String(trimmedName.dropFirst(trimmedRemote.count + 1))
+            : trimmedName
+
+        guard shortBranchName.isEmpty == false && shortBranchName != "HEAD" else {
+            throw LibGit2Error.invalidReference
+        }
+
+        try pushRefspecs([":refs/heads/\(shortBranchName)"], at: path, remote: trimmedRemote, verbose: verbose)
+    }
+
+    /// 推送本地标签到远程。
+    public static func pushTag(named tagName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
+        let trimmedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedName.isEmpty == false, trimmedRemote.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        try pushRefspecs(["refs/tags/\(trimmedName):refs/tags/\(trimmedName)"], at: path, remote: trimmedRemote, verbose: verbose)
+    }
+
+    /// 删除远程标签。
+    public static func deleteRemoteTag(named tagName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
+        let trimmedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedName.isEmpty == false, trimmedRemote.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        try pushRefspecs([":refs/tags/\(trimmedName)"], at: path, remote: trimmedRemote, verbose: verbose)
+    }
+
+    /// 使用指定 refspec 推送到远程仓库。
+    public static func pushRefspecs(_ refspecs: [String], at path: String, remote: String = "origin", verbose: Bool = true) throws {
         NetworkCallbacks.verbose = verbose
         if NetworkCallbacks.verbose { os_log("\(t)Pushing to remote: \(remote)") }
+
+        let trimmedRefspecs = refspecs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+
+        guard trimmedRefspecs.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
 
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
@@ -95,25 +189,15 @@ extension LibGit2 {
             throw LibGit2Error.remoteNotFound(remote)
         }
 
-        // 获取当前分支名
-        let branchName: String
-        if let branch = branch {
-            branchName = branch
-        } else {
-            branchName = try getCurrentBranch(at: path)
-        }
+        let refspecPointers = trimmedRefspecs.map { strdup($0) }
+        defer { refspecPointers.forEach { free($0) } }
 
-        // 构建 refspec
-        let refspec = "refs/heads/\(branchName):refs/heads/\(branchName)"
-        let refspecPtr = strdup(refspec)
-        defer { free(refspecPtr) }
-        
-        var refspecs = git_strarray()
-        var refspecArray: [UnsafeMutablePointer<CChar>?] = [refspecPtr]
+        var gitRefspecs = git_strarray()
+        var refspecArray = refspecPointers
         let result_strarray = refspecArray.withUnsafeMutableBufferPointer { buffer -> Int32 in
-            refspecs.strings = buffer.baseAddress
-            refspecs.count = 1
-            
+            gitRefspecs.strings = buffer.baseAddress
+            gitRefspecs.count = trimmedRefspecs.count
+
             var pushOpts = git_push_options()
             git_push_init_options(&pushOpts, UInt32(GIT_PUSH_OPTIONS_VERSION))
 
@@ -126,7 +210,7 @@ extension LibGit2 {
             pushOpts.callbacks.credentials = gitCredentialCallback
             pushOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
 
-            let result = git_remote_push(remotePtr, &refspecs, &pushOpts)
+            let result = git_remote_push(remotePtr, &gitRefspecs, &pushOpts)
             verbosePayloadPtr.deallocate()
             return result
         }
@@ -320,6 +404,44 @@ extension LibGit2 {
         }
 
         os_log("\(t)Pull completed successfully")
+    }
+
+    /// Fetch remote refs without merging them into the current branch.
+    public static func fetch(at path: String, remote: String = "origin", prune: Bool = true, verbose: Bool = true) throws {
+        NetworkCallbacks.verbose = verbose
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var remoteObj: OpaquePointer?
+        defer { if remoteObj != nil { git_remote_free(remoteObj) } }
+
+        guard git_remote_lookup(&remoteObj, repo, remote) == 0, let remoteObj else {
+            throw LibGit2Error.remoteNotFound(remote)
+        }
+
+        var fetchOpts = git_fetch_options()
+        git_fetch_init_options(&fetchOpts, UInt32(GIT_FETCH_OPTIONS_VERSION))
+        fetchOpts.callbacks.credentials = gitCredentialCallback
+        fetchOpts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
+        fetchOpts.prune = prune ? GIT_FETCH_PRUNE : GIT_FETCH_NO_PRUNE
+
+        let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        verbosePayloadPtr.pointee = verbose
+        defer { verbosePayloadPtr.deallocate() }
+        fetchOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
+
+        let result = git_remote_fetch(remoteObj, nil, &fetchOpts, nil)
+        if result != 0 {
+            if let error = git_error_last() {
+                let message = String(cString: error.pointee.message)
+                if isAuthenticationError(result, errorMessage: message) {
+                    throw LibGit2Error.authenticationError
+                }
+                throw LibGit2Error.pullFailed(message)
+            }
+            throw LibGit2Error.pullFailed("Fetch failed")
+        }
     }
 
     /// 克隆远程仓库

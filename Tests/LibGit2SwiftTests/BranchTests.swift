@@ -1,5 +1,6 @@
 import Foundation
 @testable import LibGit2Swift
+import Clibgit2
 import XCTest
 
 /// Branch 相关功能的测试
@@ -394,5 +395,120 @@ final class BranchTests: LibGit2SwiftTestCase {
 
         // 验证返回值不为nil
         XCTAssertNotNil(allBranches, "Should return branch list")
+    }
+
+    func testBranchNameValidation() {
+        XCTAssertTrue(LibGit2.isValidBranchName("feature/gitok-libgit2"))
+        XCTAssertTrue(LibGit2.isValidTagName("v1.2.3"))
+        XCTAssertFalse(LibGit2.isValidBranchName(""))
+        XCTAssertFalse(LibGit2.isValidBranchName("bad branch"))
+        XCTAssertFalse(LibGit2.isValidTagName("bad tag"))
+    }
+
+    func testRemoteBranchNamesFiltersHeadAndRemote() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        try createRemoteTrackingBranch(named: "origin/main")
+        try createRemoteTrackingBranch(named: "origin/feature")
+        try createRemoteTrackingBranch(named: "upstream/main")
+
+        let allNames = try LibGit2.getRemoteBranchNames(at: testRepo.repositoryPath)
+        XCTAssertEqual(allNames, ["origin/feature", "origin/main", "upstream/main"])
+
+        let originNames = try LibGit2.getRemoteBranchNames(at: testRepo.repositoryPath, remote: "origin")
+        XCTAssertEqual(originNames, ["origin/feature", "origin/main"])
+    }
+
+    func testSetUnsetUpstreamAndAheadBehind() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        try LibGit2.addRemote(name: "origin", url: "https://github.com/test/test.git", at: testRepo.repositoryPath)
+        let currentBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        try createRemoteTrackingBranch(named: "origin/\(currentBranch)")
+        try LibGit2.setUpstream(localBranch: currentBranch, upstreamBranch: "origin/\(currentBranch)", at: testRepo.repositoryPath)
+
+        var sync = try LibGit2.aheadBehind(at: testRepo.repositoryPath)
+        XCTAssertEqual(sync, GitAheadBehind(ahead: 0, behind: 0, hasUpstream: true))
+
+        try testRepo.createFileAndCommit(
+            fileName: "ahead.txt",
+            content: "Ahead",
+            message: "Ahead commit"
+        )
+
+        sync = try LibGit2.aheadBehind(at: testRepo.repositoryPath)
+        XCTAssertEqual(sync, GitAheadBehind(ahead: 1, behind: 0, hasUpstream: true))
+
+        try LibGit2.unsetUpstream(localBranch: currentBranch, at: testRepo.repositoryPath)
+        sync = try LibGit2.aheadBehind(at: testRepo.repositoryPath)
+        XCTAssertEqual(sync, .noUpstream)
+    }
+
+    func testCompareBranchesReturnsCountsCommitsAndFiles() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Initial",
+            message: "Initial commit"
+        )
+
+        let baseBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        try LibGit2.createBranch(named: "feature/compare", at: testRepo.repositoryPath, checkout: true)
+        try testRepo.createFileAndCommit(
+            fileName: "feature.txt",
+            content: "Feature",
+            message: "Feature commit"
+        )
+
+        try LibGit2.checkout(branch: baseBranch, at: testRepo.repositoryPath, verbose: false)
+        try testRepo.createFileAndCommit(
+            fileName: "main.txt",
+            content: "Main",
+            message: "Main commit"
+        )
+
+        let compare = try LibGit2.compareBranches(
+            base: baseBranch,
+            head: "feature/compare",
+            at: testRepo.repositoryPath
+        )
+
+        XCTAssertEqual(compare.ahead, 1)
+        XCTAssertEqual(compare.behind, 1)
+        XCTAssertEqual(compare.commits.map(\.subject), ["Feature commit"])
+        XCTAssertEqual(compare.files, [GitBranchCompareFile(status: "A", path: "feature.txt")])
+    }
+
+    private func createRemoteTrackingBranch(named name: String) throws {
+        let repo = try LibGit2.openRepository(at: testRepo.repositoryPath)
+        defer { git_repository_free(repo) }
+
+        var headOID = git_oid()
+        guard git_reference_name_to_id(&headOID, repo, "HEAD") == 0 else {
+            throw LibGit2Error.cannotGetHEAD
+        }
+
+        var remoteRef: OpaquePointer?
+        defer { if remoteRef != nil { git_reference_free(remoteRef) } }
+
+        let result = git_reference_create(
+            &remoteRef,
+            repo,
+            "refs/remotes/\(name)",
+            &headOID,
+            1,
+            nil
+        )
+
+        guard result == 0 else {
+            throw LibGit2Error.invalidReference
+        }
     }
 }

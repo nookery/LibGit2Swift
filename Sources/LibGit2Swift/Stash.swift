@@ -14,7 +14,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 暂存索引
-    static func stash(message: String? = nil, at path: String, verbose: Bool = true) throws -> Int {
+    public static func stash(message: String? = nil, at path: String, verbose: Bool = true) throws -> Int {
         if verbose { os_log("🐚 LibGit2: Stashing changes") }
 
         let repo = try openRepository(at: path)
@@ -53,7 +53,7 @@ extension LibGit2 {
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    static func stashPop(index: Int = 0, at path: String, verbose: Bool = true) throws {
+    public static func stashPop(index: Int = 0, at path: String, verbose: Bool = true) throws {
         if verbose { os_log("🐚 LibGit2: Popping stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
@@ -76,7 +76,7 @@ extension LibGit2 {
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    static func stashApply(index: Int = 0, at path: String, verbose: Bool = true) throws {
+    public static func stashApply(index: Int = 0, at path: String, verbose: Bool = true) throws {
         if verbose { os_log("🐚 LibGit2: Applying stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
@@ -99,7 +99,7 @@ extension LibGit2 {
     /// 获取暂存列表
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存信息列表
-    static func getStashList(at path: String) throws -> [(index: Int, message: String, commitHash: String)] {
+    public static func getStashList(at path: String) throws -> [(index: Int, message: String, commitHash: String)] {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
@@ -129,7 +129,7 @@ extension LibGit2 {
     ///   - index: 暂存索引（默认 0，即最近的 stash）
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    static func stashDrop(index: Int = 0, at path: String, verbose: Bool = true) throws {
+    public static func stashDrop(index: Int = 0, at path: String, verbose: Bool = true) throws {
         if verbose { os_log("🐚 LibGit2: Dropping stash at index: %d", index) }
 
         let repo = try openRepository(at: path)
@@ -144,11 +144,54 @@ extension LibGit2 {
         if verbose { os_log("🐚 LibGit2: Stash dropped successfully") }
     }
 
+    /// Create a branch at the stash base commit, check it out, apply the stash, then drop it.
+    public static func stashBranch(name branchName: String, index: Int, at path: String, verbose: Bool = true) throws {
+        let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let stashes = try getStashList(at: path)
+        guard let stash = stashes.first(where: { $0.index == index }) else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var stashOID = git_oid()
+        guard git_oid_fromstr(&stashOID, stash.commitHash) == 0 else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var stashCommit: OpaquePointer?
+        defer { if stashCommit != nil { git_commit_free(stashCommit) } }
+        guard git_commit_lookup(&stashCommit, repo, &stashOID) == 0, let stashCommit else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var baseCommit: OpaquePointer?
+        defer { if baseCommit != nil { git_commit_free(baseCommit) } }
+        guard git_commit_parent(&baseCommit, stashCommit, 0) == 0, let baseCommit else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var branchRef: OpaquePointer?
+        defer { if branchRef != nil { git_reference_free(branchRef) } }
+        guard git_branch_create(&branchRef, repo, trimmedName, baseCommit, 0) == 0 else {
+            throw LibGit2Error.invalidReference
+        }
+
+        try checkout(branch: trimmedName, at: path, verbose: verbose)
+        try stashApply(index: index, at: path, verbose: verbose)
+        try stashDrop(index: index, at: path, verbose: verbose)
+    }
+
     /// 清空所有暂存
     /// - Parameters:
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
-    static func stashClear(at path: String, verbose: Bool = true) throws {
+    public static func stashClear(at path: String, verbose: Bool = true) throws {
         if verbose { os_log("🐚 LibGit2: Clearing all stashes") }
 
         let repo = try openRepository(at: path)
@@ -167,7 +210,7 @@ extension LibGit2 {
     /// 获取暂存数量
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存数量
-    static func getStashCount(at path: String) throws -> Int {
+    public static func getStashCount(at path: String) throws -> Int {
         let stashes = try getStashList(at: path)
         return stashes.count
     }
@@ -175,7 +218,7 @@ extension LibGit2 {
     /// 检查是否有暂存
     /// - Parameter path: 仓库路径
     /// - Returns: 如果有暂存返回 true
-    static func hasStash(at path: String) throws -> Bool {
+    public static func hasStash(at path: String) throws -> Bool {
         return try getStashCount(at: path) > 0
     }
 }

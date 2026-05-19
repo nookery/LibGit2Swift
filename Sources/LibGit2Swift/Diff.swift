@@ -5,6 +5,35 @@ import OSLog
 
 /// LibGit2 差异操作扩展
 extension LibGit2 {
+    /// 将 unified diff patch 应用到 index，等价于 `git apply --cached`。
+    /// `mode == .unstage` 时会先反转 patch，再应用到 index。
+    public static func applyPatch(_ patch: String, mode: GitPatchApplyMode, at path: String) throws {
+        let normalizedPatch = patch.hasSuffix("\n") ? patch : patch + "\n"
+        let patchToApply = mode == .stage ? normalizedPatch : reverseUnifiedDiff(normalizedPatch)
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var diff: OpaquePointer?
+        defer { if diff != nil { git_diff_free(diff) } }
+
+        let parseResult = patchToApply.withCString { buffer in
+            git_diff_from_buffer(&diff, buffer, strlen(buffer))
+        }
+        guard parseResult == 0, let diff else {
+            try applyTextPatchToIndex(patchToApply, repo: repo)
+            return
+        }
+
+        var applyOptions = git_apply_options()
+        git_apply_options_init(&applyOptions, UInt32(GIT_APPLY_OPTIONS_VERSION))
+
+        let result = git_apply(repo, diff, GIT_APPLY_LOCATION_INDEX, &applyOptions)
+        if result != 0 {
+            try applyTextPatchToIndex(patchToApply, repo: repo)
+        }
+    }
+
     /// 获取差异文件列表
     /// - Parameters:
     ///   - path: 仓库路径
@@ -824,5 +853,215 @@ extension LibGit2 {
             return ""
         }
         return lines.map { "\(prefix)\($0)\n" }.joined()
+    }
+
+    private static func reverseUnifiedDiff(_ patch: String) -> String {
+        let lines = patch.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var reversed: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index]
+
+            if line.hasPrefix("--- "),
+               index + 1 < lines.count,
+               lines[index + 1].hasPrefix("+++ ") {
+                reversed.append("--- " + String(lines[index + 1].dropFirst(4)))
+                reversed.append("+++ " + String(line.dropFirst(4)))
+                index += 2
+                continue
+            }
+
+            if line.hasPrefix("new file mode ") {
+                reversed.append(line.replacingOccurrences(of: "new file mode ", with: "deleted file mode "))
+            } else if line.hasPrefix("deleted file mode ") {
+                reversed.append(line.replacingOccurrences(of: "deleted file mode ", with: "new file mode "))
+            } else if line.hasPrefix("+"), line.hasPrefix("+++") == false {
+                reversed.append("-" + String(line.dropFirst()))
+            } else if line.hasPrefix("-"), line.hasPrefix("---") == false {
+                reversed.append("+" + String(line.dropFirst()))
+            } else {
+                reversed.append(line)
+            }
+
+            index += 1
+        }
+
+        return reversed.joined(separator: "\n")
+    }
+
+    private struct TextPatchFile {
+        let path: String
+        let hunks: [TextPatchHunk]
+    }
+
+    private struct TextPatchHunk {
+        let oldStart: Int
+        let lines: [String]
+    }
+
+    private static func applyTextPatchToIndex(_ patch: String, repo: OpaquePointer) throws {
+        let patchFiles = try parseTextPatchFiles(patch)
+        guard patchFiles.isEmpty == false else {
+            throw LibGit2Error.invalidValue
+        }
+
+        var index: OpaquePointer?
+        defer { if index != nil { git_index_free(index) } }
+
+        guard git_repository_index(&index, repo) == 0, let index else {
+            throw LibGit2Error.cannotGetIndex
+        }
+
+        for patchFile in patchFiles {
+            let existingEntry = git_index_get_bypath(index, patchFile.path, 0)
+            let currentContent = try indexContent(path: patchFile.path, entry: existingEntry, repo: repo)
+            let updatedContent = try applyHunks(patchFile.hunks, to: currentContent)
+
+            var entry = existingEntry?.pointee ?? git_index_entry()
+            entry.mode = existingEntry?.pointee.mode ?? UInt32(GIT_FILEMODE_BLOB.rawValue)
+            entry.file_size = UInt32(updatedContent.utf8.count)
+
+            let result = patchFile.path.withCString { pathPointer in
+                updatedContent.withCString { contentPointer in
+                    entry.path = pathPointer
+                    return git_index_add_from_buffer(index, &entry, contentPointer, strlen(contentPointer))
+                }
+            }
+
+            if result != 0 {
+                throw LibGit2Error.invalidValue
+            }
+        }
+
+        if git_index_write(index) != 0 {
+            throw LibGit2Error.cannotWriteTree
+        }
+    }
+
+    private static func parseTextPatchFiles(_ patch: String) throws -> [TextPatchFile] {
+        let lines = patch.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var files: [TextPatchFile] = []
+        var oldPath: String?
+        var newPath: String?
+        var hunks: [TextPatchHunk] = []
+        var currentHunkStart: Int?
+        var currentHunkLines: [String] = []
+
+        func finishHunk() {
+            if let currentHunkStart {
+                hunks.append(TextPatchHunk(oldStart: currentHunkStart, lines: currentHunkLines))
+            }
+            currentHunkStart = nil
+            currentHunkLines = []
+        }
+
+        func finishFile() {
+            finishHunk()
+            let candidatePath = (newPath != "/dev/null" ? newPath : oldPath)
+            if let candidatePath, hunks.isEmpty == false {
+                files.append(TextPatchFile(path: stripDiffPathPrefix(candidatePath), hunks: hunks))
+            }
+            oldPath = nil
+            newPath = nil
+            hunks = []
+        }
+
+        for line in lines {
+            if line.hasPrefix("diff --git ") {
+                finishFile()
+            } else if line.hasPrefix("--- ") {
+                oldPath = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("+++ ") {
+                newPath = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("@@ ") {
+                finishHunk()
+                currentHunkStart = try parseHunkOldStart(line)
+            } else if currentHunkStart != nil {
+                currentHunkLines.append(line)
+            }
+        }
+
+        finishFile()
+        return files
+    }
+
+    private static func parseHunkOldStart(_ header: String) throws -> Int {
+        guard let range = header.range(of: #"@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@"#, options: .regularExpression) else {
+            throw LibGit2Error.invalidValue
+        }
+
+        let matched = String(header[range])
+        guard let startRange = matched.range(of: #"(?<=@@ -)\d+"#, options: .regularExpression),
+              let start = Int(matched[startRange]) else {
+            throw LibGit2Error.invalidValue
+        }
+
+        return max(start, 1)
+    }
+
+    private static func stripDiffPathPrefix(_ path: String) -> String {
+        if path.hasPrefix("a/") || path.hasPrefix("b/") {
+            return String(path.dropFirst(2))
+        }
+        return path
+    }
+
+    private static func indexContent(path: String, entry: UnsafePointer<git_index_entry>?, repo: OpaquePointer) throws -> String {
+        guard let entry else {
+            return ""
+        }
+
+        var oid = entry.pointee.id
+        var blob: OpaquePointer?
+        defer { if blob != nil { git_blob_free(blob) } }
+
+        guard git_blob_lookup(&blob, repo, &oid) == 0,
+              let blob,
+              let rawContent = git_blob_rawcontent(blob) else {
+            throw LibGit2Error.invalidValue
+        }
+
+        let rawSize = Int(git_blob_rawsize(blob))
+        let data = Data(bytes: rawContent, count: rawSize)
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private static func applyHunks(_ hunks: [TextPatchHunk], to content: String) throws -> String {
+        let sourceLines = normalizedDiffLines(content)
+        var output: [String] = []
+        var sourceIndex = 0
+
+        for hunk in hunks {
+            let hunkStartIndex = max(hunk.oldStart - 1, 0)
+            while sourceIndex < hunkStartIndex && sourceIndex < sourceLines.count {
+                output.append(sourceLines[sourceIndex])
+                sourceIndex += 1
+            }
+
+            for line in hunk.lines {
+                if line.hasPrefix("\\ No newline at end of file") {
+                    continue
+                }
+
+                if line.hasPrefix(" ") {
+                    guard sourceIndex < sourceLines.count else { throw LibGit2Error.invalidValue }
+                    output.append(sourceLines[sourceIndex])
+                    sourceIndex += 1
+                } else if line.hasPrefix("-") {
+                    guard sourceIndex < sourceLines.count else { throw LibGit2Error.invalidValue }
+                    sourceIndex += 1
+                } else if line.hasPrefix("+") {
+                    output.append(String(line.dropFirst()))
+                }
+            }
+        }
+
+        while sourceIndex < sourceLines.count {
+            output.append(sourceLines[sourceIndex])
+            sourceIndex += 1
+        }
+
+        return output.map { "\($0)\n" }.joined()
     }
 }

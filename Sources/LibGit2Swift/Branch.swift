@@ -284,4 +284,312 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(newName)
         }
     }
+
+    /// 检查分支名是否符合 Git 的分支命名规则。
+    public static func isValidBranchName(_ name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else { return false }
+
+        var valid: Int32 = 0
+        return git_branch_name_is_valid(&valid, trimmedName) == 0 && valid == 1
+    }
+
+    /// 检查标签名是否符合 Git 单段引用命名规则。
+    public static func isValidTagName(_ name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else { return false }
+
+        var buffer = [CChar](repeating: 0, count: 1024)
+        return git_reference_normalize_name(
+            &buffer,
+            buffer.count,
+            "refs/tags/\(trimmedName)",
+            GIT_REFERENCE_FORMAT_NORMAL.rawValue
+        ) == 0
+    }
+
+    /// 获取远程分支短名称，等价于 `git branch -r --format=%(refname:short)`。
+    public static func getRemoteBranchNames(at path: String, remote: String? = nil) throws -> [String] {
+        let trimmedRemote = remote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try getRemoteBranches(at: path)
+            .map(\.id)
+            .filter { $0.isEmpty == false && $0.hasSuffix("/HEAD") == false }
+            .filter { branch in
+                guard let trimmedRemote, trimmedRemote.isEmpty == false else { return true }
+                return branch.hasPrefix(trimmedRemote + "/")
+            }
+            .sorted()
+    }
+
+    /// 设置本地分支 upstream，upstreamBranch 使用 `origin/main` 这种短名称。
+    public static func setUpstream(localBranch: String, upstreamBranch: String, at path: String) throws {
+        let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUpstreamBranch = upstreamBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedLocalBranch.isEmpty == false, trimmedUpstreamBranch.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var branchRef: OpaquePointer?
+        defer { if branchRef != nil { git_reference_free(branchRef) } }
+
+        guard git_branch_lookup(&branchRef, repo, trimmedLocalBranch, GIT_BRANCH_LOCAL) == 0,
+              let branchRef else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let result = git_branch_set_upstream(branchRef, trimmedUpstreamBranch)
+        if result != 0 {
+            throw LibGit2Error.invalidReference
+        }
+    }
+
+    /// 清除本地分支 upstream。
+    public static func unsetUpstream(localBranch: String, at path: String) throws {
+        let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedLocalBranch.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var branchRef: OpaquePointer?
+        defer { if branchRef != nil { git_reference_free(branchRef) } }
+
+        guard git_branch_lookup(&branchRef, repo, trimmedLocalBranch, GIT_BRANCH_LOCAL) == 0,
+              let branchRef else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let result = git_branch_set_upstream(branchRef, nil)
+        if result != 0 {
+            throw LibGit2Error.invalidReference
+        }
+    }
+
+    /// 比较 HEAD 与 upstream 的 ahead/behind 状态。
+    public static func aheadBehind(at path: String) throws -> GitAheadBehind {
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var headRef: OpaquePointer?
+        defer { if headRef != nil { git_reference_free(headRef) } }
+
+        guard git_repository_head(&headRef, repo) == 0, let headRef else {
+            throw LibGit2Error.cannotGetHEAD
+        }
+
+        var upstreamRef: OpaquePointer?
+        defer { if upstreamRef != nil { git_reference_free(upstreamRef) } }
+
+        guard git_branch_upstream(&upstreamRef, headRef) == 0, let upstreamRef else {
+            return .noUpstream
+        }
+
+        guard let headOIDPointer = git_reference_target(headRef),
+              let upstreamOIDPointer = git_reference_target(upstreamRef) else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var headOID = headOIDPointer.pointee
+        var upstreamOID = upstreamOIDPointer.pointee
+        var ahead = 0
+        var behind = 0
+
+        guard git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &upstreamOID) == 0 else {
+            throw LibGit2Error.invalidReference
+        }
+
+        return GitAheadBehind(ahead: ahead, behind: behind, hasUpstream: true)
+    }
+
+    /// 比较两个引用，等价于 GitOK 当前使用的 `rev-list` / `log` / `diff --name-status` 组合。
+    public static func compareBranches(base: String, head: String, at path: String) throws -> GitBranchCompare {
+        let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedHead = head.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedBase.isEmpty == false, trimmedHead.isEmpty == false else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        var baseOID = try resolveCommitOID(trimmedBase, in: repo)
+        var headOID = try resolveCommitOID(trimmedHead, in: repo)
+
+        var ahead = 0
+        var behind = 0
+        guard git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &baseOID) == 0 else {
+            throw LibGit2Error.invalidReference
+        }
+
+        let commits = try branchCompareCommits(baseOID: &baseOID, headOID: &headOID, repo: repo)
+        let files = try branchCompareFiles(baseOID: &baseOID, headOID: &headOID, repo: repo)
+
+        return GitBranchCompare(
+            base: trimmedBase,
+            head: trimmedHead,
+            ahead: ahead,
+            behind: behind,
+            commits: commits,
+            files: files
+        )
+    }
+
+    private static func resolveCommitOID(_ revision: String, in repo: OpaquePointer) throws -> git_oid {
+        var object: OpaquePointer?
+        defer { if object != nil { git_object_free(object) } }
+
+        guard git_revparse_single(&object, repo, revision) == 0,
+              let object,
+              let oidPointer = git_object_id(object) else {
+            throw LibGit2Error.invalidReference
+        }
+
+        return oidPointer.pointee
+    }
+
+    private static func branchCompareCommits(
+        baseOID: inout git_oid,
+        headOID: inout git_oid,
+        repo: OpaquePointer
+    ) throws -> [GitBranchCompareCommit] {
+        var walker: OpaquePointer?
+        defer { if walker != nil { git_revwalk_free(walker) } }
+
+        guard git_revwalk_new(&walker, repo) == 0, let walker else {
+            throw LibGit2Error.cannotCreateRevwalk
+        }
+
+        git_revwalk_sorting(walker, GIT_SORT_TIME.rawValue)
+        git_revwalk_push(walker, &headOID)
+        git_revwalk_hide(walker, &baseOID)
+
+        var commits: [GitBranchCompareCommit] = []
+        var oid = git_oid()
+        while git_revwalk_next(&oid, walker) == 0 {
+            var commit: OpaquePointer?
+            defer { if commit != nil { git_commit_free(commit) } }
+
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commit else {
+                continue
+            }
+
+            let hash = oidToString(oid)
+            let authorPointer = git_commit_author(commit)
+            let author: String
+            let date: Date
+            if let authorPointer {
+                let name = authorPointer.pointee.name.map { String(cString: $0) } ?? ""
+                let email = authorPointer.pointee.email.map { String(cString: $0) } ?? ""
+                author = email.isEmpty ? name : "\(name) <\(email)>"
+                date = Date(timeIntervalSince1970: TimeInterval(authorPointer.pointee.when.time))
+            } else {
+                author = ""
+                date = Date(timeIntervalSince1970: 0)
+            }
+
+            let message = git_commit_message(commit).map { String(cString: $0) } ?? ""
+            let subject = message.components(separatedBy: "\n").first ?? message
+            commits.append(GitBranchCompareCommit(hash: hash, author: author, date: date, subject: subject))
+        }
+
+        return commits
+    }
+
+    private static func branchCompareFiles(
+        baseOID: inout git_oid,
+        headOID: inout git_oid,
+        repo: OpaquePointer
+    ) throws -> [GitBranchCompareFile] {
+        var mergeBaseOID = git_oid()
+        let baseForDiff: git_oid
+        if git_merge_base(&mergeBaseOID, repo, &baseOID, &headOID) == 0 {
+            baseForDiff = mergeBaseOID
+        } else {
+            baseForDiff = baseOID
+        }
+
+        var mutableBaseForDiff = baseForDiff
+        var baseCommit: OpaquePointer?
+        var headCommit: OpaquePointer?
+        var baseTree: OpaquePointer?
+        var headTree: OpaquePointer?
+        var diff: OpaquePointer?
+
+        defer {
+            if diff != nil { git_diff_free(diff) }
+            if baseTree != nil { git_tree_free(baseTree) }
+            if headTree != nil { git_tree_free(headTree) }
+            if baseCommit != nil { git_commit_free(baseCommit) }
+            if headCommit != nil { git_commit_free(headCommit) }
+        }
+
+        guard git_commit_lookup(&baseCommit, repo, &mutableBaseForDiff) == 0,
+              git_commit_lookup(&headCommit, repo, &headOID) == 0,
+              let baseCommit,
+              let headCommit,
+              git_commit_tree(&baseTree, baseCommit) == 0,
+              git_commit_tree(&headTree, headCommit) == 0 else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var diffOptions = git_diff_options()
+        git_diff_init_options(&diffOptions, UInt32(GIT_DIFF_OPTIONS_VERSION))
+        guard git_diff_tree_to_tree(&diff, repo, baseTree, headTree, &diffOptions) == 0,
+              let diff else {
+            throw LibGit2Error.invalidReference
+        }
+
+        var findOptions = git_diff_find_options()
+        git_diff_find_options_init(&findOptions, UInt32(GIT_DIFF_FIND_OPTIONS_VERSION))
+        findOptions.flags = GIT_DIFF_FIND_RENAMES.rawValue | GIT_DIFF_FIND_COPIES.rawValue
+        _ = git_diff_find_similar(diff, &findOptions)
+
+        var files: [GitBranchCompareFile] = []
+        for index in 0..<git_diff_num_deltas(diff) {
+            guard let delta = git_diff_get_delta(diff, index) else { continue }
+
+            let status = branchCompareStatus(delta.pointee)
+            let path = String(cString: delta.pointee.new_file.path)
+            let oldPath = String(cString: delta.pointee.old_file.path)
+
+            if delta.pointee.status == GIT_DELTA_RENAMED || delta.pointee.status == GIT_DELTA_COPIED {
+                files.append(GitBranchCompareFile(status: status, path: path, oldPath: oldPath))
+            } else {
+                files.append(GitBranchCompareFile(status: status, path: path))
+            }
+        }
+
+        return files.sorted { lhs, rhs in
+            if lhs.path == rhs.path {
+                return lhs.status < rhs.status
+            }
+            return lhs.path < rhs.path
+        }
+    }
+
+    private static func branchCompareStatus(_ delta: git_diff_delta) -> String {
+        switch delta.status {
+        case GIT_DELTA_ADDED:
+            return "A"
+        case GIT_DELTA_DELETED:
+            return "D"
+        case GIT_DELTA_RENAMED:
+            return "R\(delta.similarity)"
+        case GIT_DELTA_COPIED:
+            return "C\(delta.similarity)"
+        case GIT_DELTA_TYPECHANGE:
+            return "T"
+        case GIT_DELTA_CONFLICTED:
+            return "U"
+        default:
+            return "M"
+        }
+    }
 }

@@ -24,6 +24,15 @@ public class LibGit2: SuperLog {
         git_libgit2_shutdown()
     }
 
+    /// 当前链接的 libgit2 版本。
+    public static func versionString() -> String {
+        var major: Int32 = 0
+        var minor: Int32 = 0
+        var revision: Int32 = 0
+        git_libgit2_version(&major, &minor, &revision)
+        return "\(major).\(minor).\(revision)"
+    }
+
     /// 获取 libgit2 最后一次发生的错误描述
     private static func lastError() -> String {
         if let error = git_error_last() {

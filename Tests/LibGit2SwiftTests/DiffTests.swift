@@ -1027,4 +1027,29 @@ final class DiffTests: LibGit2SwiftTestCase {
         let fileDiff = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: false)
         XCTAssertFalse(fileDiff.isEmpty, "File diff should not be empty")
     }
+
+    func testApplyPatchStagesAndUnstagesModifiedFile() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Original\n",
+            message: "Initial commit"
+        )
+
+        try "Modified\n".write(
+            to: testRepo.tempDirectory.appendingPathComponent("file.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let patch = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: false)
+        XCTAssertFalse(patch.isEmpty)
+
+        try LibGit2.applyPatch(patch, mode: .stage, at: testRepo.repositoryPath)
+        var stagedDiff = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: true)
+        XCTAssertTrue(stagedDiff.contains("+Modified"))
+
+        try LibGit2.applyPatch(patch, mode: .unstage, at: testRepo.repositoryPath)
+        stagedDiff = try LibGit2.getFileDiff(for: "file.txt", at: testRepo.repositoryPath, staged: true)
+        XCTAssertTrue(stagedDiff.isEmpty)
+    }
 }

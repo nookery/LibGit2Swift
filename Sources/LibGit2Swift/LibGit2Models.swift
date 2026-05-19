@@ -138,6 +138,91 @@ public struct GitRemote: Identifiable, Codable, Hashable {
     }
 }
 
+/// Git ahead/behind comparison against an upstream or another reference.
+public struct GitAheadBehind: Codable, Hashable, Sendable {
+    public let ahead: Int
+    public let behind: Int
+    public let hasUpstream: Bool
+
+    public init(ahead: Int, behind: Int, hasUpstream: Bool) {
+        self.ahead = ahead
+        self.behind = behind
+        self.hasUpstream = hasUpstream
+    }
+
+    public static let noUpstream = GitAheadBehind(ahead: 0, behind: 0, hasUpstream: false)
+}
+
+/// Commit summary used by branch comparison views.
+public struct GitBranchCompareCommit: Identifiable, Codable, Hashable, Sendable {
+    public let hash: String
+    public let author: String
+    public let date: Date
+    public let subject: String
+
+    public init(hash: String, author: String, date: Date, subject: String) {
+        self.hash = hash
+        self.author = author
+        self.date = date
+        self.subject = subject
+    }
+
+    public var id: String { hash }
+}
+
+/// File summary used by branch comparison views.
+public struct GitBranchCompareFile: Identifiable, Codable, Hashable, Sendable {
+    public let status: String
+    public let path: String
+    public let oldPath: String?
+
+    public init(status: String, path: String, oldPath: String? = nil) {
+        self.status = status
+        self.path = path
+        self.oldPath = oldPath
+    }
+
+    public var id: String {
+        if let oldPath {
+            return "\(status):\(oldPath)->\(path)"
+        }
+        return "\(status):\(path)"
+    }
+}
+
+/// Branch comparison result equivalent to `rev-list --left-right --count`,
+/// `log base..head`, and `diff --name-status base...head`.
+public struct GitBranchCompare: Codable, Hashable, Sendable {
+    public let base: String
+    public let head: String
+    public let ahead: Int
+    public let behind: Int
+    public let commits: [GitBranchCompareCommit]
+    public let files: [GitBranchCompareFile]
+
+    public init(
+        base: String,
+        head: String,
+        ahead: Int,
+        behind: Int,
+        commits: [GitBranchCompareCommit],
+        files: [GitBranchCompareFile]
+    ) {
+        self.base = base
+        self.head = head
+        self.ahead = ahead
+        self.behind = behind
+        self.commits = commits
+        self.files = files
+    }
+}
+
+/// Patch application mode for index-only hunk staging operations.
+public enum GitPatchApplyMode: Codable, Hashable, Sendable {
+    case stage
+    case unstage
+}
+
 /// Git 标签模型 (如果需要 struct)
 public struct GitTag: Identifiable, Codable, Hashable {
     public let id: String
