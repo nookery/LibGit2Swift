@@ -105,7 +105,7 @@ extension LibGit2 {
     ///   - message: 提交信息
     ///   - path: 仓库路径
     /// - Returns: 创建的提交哈希
-    static func addAndCommit(files: [String], message: String, at path: String, verbose: Bool = true) throws -> String {
+    public static func addAndCommit(files: [String], message: String, at path: String, verbose: Bool = true) throws -> String {
         if verbose { os_log("\(self.t)Adding and committing files: \(files)") }
         try addFiles(files, at: path)
         return try createCommit(message: message, at: path, verbose: verbose)
@@ -116,7 +116,7 @@ extension LibGit2 {
     ///   - message: 新的提交信息（nil 表示不修改）
     ///   - path: 仓库路径
     /// - Returns: 新的提交哈希
-    static func amendCommit(message: String? = nil, at path: String, verbose: Bool) throws -> String {
+    public static func amendCommit(message: String? = nil, at path: String, verbose: Bool) throws -> String {
         if verbose { os_log("\(self.t)Amending commit with message: \(message ?? "nil")") }
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
