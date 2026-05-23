@@ -239,7 +239,7 @@ extension LibGit2 {
     ///   - commitHash: 提交哈希
     ///   - path: 仓库路径
     /// - Returns: 提交详细信息
-    static func getCommitDetail(commitHash: String, at path: String) throws -> GitCommit? {
+    public static func getCommitDetail(commitHash: String, at path: String) throws -> GitCommit? {
         let repo = try openRepository(at: path)
         defer { git_repository_free(repo) }
 
