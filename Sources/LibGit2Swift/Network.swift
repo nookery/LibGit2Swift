@@ -68,6 +68,53 @@ extension LibGit2 {
         return authKeywords.contains { lowercasedMessage.contains($0) }
     }
 
+    /// 检查错误是否是网络/SSL 错误
+    /// - Parameters:
+    ///   - errorCode: libgit2 错误代码
+    ///   - errorMessage: 错误消息
+    /// - Returns: 如果是网络/SSL 错误返回 true
+    static func isNetworkError(_ errorCode: Int32, errorMessage: String) -> Bool {
+        let lowercasedMessage = errorMessage.lowercased()
+        let networkKeywords = [
+            // SSL/TLS 错误
+            "securetransport",
+            "ssl",
+            "tls",
+            "certificate",
+            "cert",
+            "-9806",    // macOS SecureTransport SSL 常见错误码
+            "-9814",    // macOS SecureTransport SSL 常见错误码
+            "-9802",    // macOS SecureTransport SSL 常见错误码
+            "-9843",    // macOS SecureTransport SSL 常见错误码
+
+            // 网络连接错误
+            "could not resolve host",
+            "failed to connect",
+            "connection timed out",
+            "connection refused",
+            "network is unreachable",
+            "no route to host",
+            "operation timed out",
+            "connection reset",
+            "broken pipe",
+            "couldn't connect",
+            "couldn't resolve",
+            "name resolution",
+            "dns",
+
+            // 代理错误
+            "proxy",
+            "tunnel",
+
+            // curl/传输层错误
+            "curl",
+            "transfer",
+            "socket",
+        ]
+
+        return networkKeywords.contains { lowercasedMessage.contains($0) }
+    }
+
     // MARK: - Public Methods
 
     /// 推送到远程仓库
@@ -238,6 +285,11 @@ extension LibGit2 {
                 throw LibGit2Error.authenticationError
             }
 
+            // 检查是否是网络/SSL 错误
+            if isNetworkError(result_strarray, errorMessage: errorMessage) {
+                throw LibGit2Error.networkError(Int(result_strarray))
+            }
+
             throw LibGit2Error.pushFailed(errorMessage)
         }
 
@@ -320,6 +372,11 @@ extension LibGit2 {
             // 检查是否是认证错误
             if isAuthenticationError(fetchResult, errorMessage: errorMessage) {
                 throw LibGit2Error.authenticationError
+            }
+
+            // 检查是否是网络/SSL 错误
+            if isNetworkError(fetchResult, errorMessage: errorMessage) {
+                throw LibGit2Error.networkError(Int(fetchResult))
             }
 
             throw LibGit2Error.pullFailed(errorMessage)
@@ -437,6 +494,9 @@ extension LibGit2 {
                 let message = String(cString: error.pointee.message)
                 if isAuthenticationError(result, errorMessage: message) {
                     throw LibGit2Error.authenticationError
+                }
+                if isNetworkError(result, errorMessage: message) {
+                    throw LibGit2Error.networkError(Int(result))
                 }
                 throw LibGit2Error.pullFailed(message)
             }
