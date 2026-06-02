@@ -19,5 +19,5 @@
 
 - [x] **Bisect** — 二分查找定位 bug 引入的提交
 - [x] **Worktree** — 多工作树管理（git worktree add/list/remove）
-- [ ] **Archive** — 导出仓库为压缩包（git archive）— libgit2 1.x 不支持
-- [ ] **Mailmap** — 邮件映射（git mailmap），统一作者身份
+- [ ] **Archive** — 导出仓库为压缩包（libgit2 1.x 不支持，需用系统 git CLI）
+- [ ] **Mailmap** — 邮件映射（低优先级，libgit2 有 API 但使用场景较少）
