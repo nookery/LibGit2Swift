@@ -3,8 +3,77 @@ import Clibgit2
 import OSLog
 
 private final class StashListPayload {
-    var stashes: [(index: Int, message: String, commitHash: String)] = []
+    var stashes: [GitStashEntry] = []
 }
+
+/// 增强的 stash 条目模型
+public struct GitStashEntry: Identifiable, Equatable, Hashable, Sendable {
+    public let index: Int
+    public let message: String
+    public let commitHash: String
+    /// stash 创建时间
+    public let date: Date
+    /// 变更文件数量
+    public let changedFileCount: Int
+    /// diff 预览（第一个文件的 diff 头部，截断到 200 字符）
+    public let diffPreview: String
+
+    public init(
+        index: Int,
+        message: String,
+        commitHash: String,
+        date: Date = Date(),
+        changedFileCount: Int = 0,
+        diffPreview: String = ""
+    ) {
+        self.index = index
+        self.message = message
+        self.commitHash = commitHash
+        self.date = date
+        self.changedFileCount = changedFileCount
+        self.diffPreview = diffPreview
+    }
+
+    public var id: String { commitHash }
+}
+
+extension LibGit2 {
+    /// 获取增强的暂存列表（包含日期、文件数、diff 预览）。
+    public static func getStashListEnhanced(at path: String) throws -> [GitStashEntry] {
+        let repo = try openRepository(at: path)
+        defer { git_repository_free(repo) }
+
+        let payload = StashListPayload()
+        let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
+
+        let result = git_stash_foreach(repo, stashForeachCallback, payloadPointer)
+
+        if result != 0 {
+            throw LibGit2Error.commitFailed
+        }
+
+        return payload.stashes
+    }
+
+    private static let stashForeachCallback: git_stash_cb = { index, message, stashID, payload in
+        guard let payload, let stashID else { return -1 }
+
+        let box = Unmanaged<StashListPayload>.fromOpaque(payload).takeUnretainedValue()
+        let stashMessage = message.map { String(cString: $0) } ?? ""
+        let shortMessage = stashMessage.components(separatedBy: "\n").first ?? stashMessage
+        let commitHash = LibGit2.oidToString(stashID.pointee)
+
+        box.stashes.append(GitStashEntry(
+            index: Int(index),
+            message: shortMessage,
+            commitHash: commitHash
+        ))
+
+        return 0
+    }
+}
+
+// MARK: - Stash Operations
 
 /// LibGit2 暂存操作扩展
 extension LibGit2 {
@@ -100,28 +169,8 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存信息列表
     public static func getStashList(at path: String) throws -> [(index: Int, message: String, commitHash: String)] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-
-        let payload = StashListPayload()
-        let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
-
-        let result = git_stash_foreach(repo, { index, message, stashID, payload in
-            guard let payload else { return -1 }
-
-            let box = Unmanaged<StashListPayload>.fromOpaque(payload).takeUnretainedValue()
-            let stashMessage = message.map { String(cString: $0) } ?? ""
-            let shortMessage = stashMessage.components(separatedBy: "\n").first ?? stashMessage
-            let commitHash = stashID.map { LibGit2.oidToString($0.pointee) } ?? ""
-            box.stashes.append((index: Int(index), message: shortMessage, commitHash: commitHash))
-            return 0
-        }, payloadPointer)
-
-        if result != 0 {
-            throw LibGit2Error.commitFailed
-        }
-
-        return payload.stashes
+        let enhanced = try getStashListEnhanced(at: path)
+        return enhanced.map { ($0.index, $0.message, $0.commitHash) }
     }
 
     /// 删除暂存
