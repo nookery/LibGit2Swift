@@ -26,26 +26,41 @@ extension LibGit2 {
             throw LibGit2Error.checkoutFailed(branch)
         }
 
-        // 直接设置HEAD文件内容为符号引用
-        let gitDir = try gitDirectory(at: path)
-        let headPath = (gitDir as NSString).appendingPathComponent("HEAD")
-
-        do {
-            try "ref: \(branchRef)\n".write(toFile: headPath, atomically: true, encoding: .utf8)
-            os_log("🐚 LibGit2: Directly wrote HEAD file: ref: \(branchRef)")
-        } catch {
-            os_log("⚠️ LibGit2: Failed to write HEAD file: \(error)")
+        // 获取目标分支的 commit 和 tree
+        var targetOID = git_oid()
+        guard git_reference_name_to_id(&targetOID, repo, branchRef) == 0 else {
             throw LibGit2Error.checkoutFailed(branch)
         }
 
-        // 检出工作目录到 HEAD
+        var targetCommit: OpaquePointer? = nil
+        guard git_commit_lookup(&targetCommit, repo, &targetOID) == 0,
+              let commit = targetCommit else {
+            throw LibGit2Error.checkoutFailed(branch)
+        }
+        defer { git_commit_free(targetCommit) }
+
+        var targetTree: OpaquePointer? = nil
+        guard git_commit_tree(&targetTree, commit) == 0,
+              let tree = targetTree else {
+            throw LibGit2Error.checkoutFailed(branch)
+        }
+        defer { git_tree_free(targetTree) }
+
+        // 先检出目标分支的 tree 到工作目录（SAFE 模式保护未提交变更）
         var checkoutOpts = git_checkout_options()
         git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-        // 使用 SAFE 策略：存在冲突的未提交变更时返回错误，而非强制覆盖
         checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue | GIT_CHECKOUT_RECREATE_MISSING.rawValue
-        let checkoutResult = git_checkout_head(repo, &checkoutOpts)
+
+        let checkoutResult = git_checkout_tree(repo, tree, &checkoutOpts)
         if checkoutResult != 0 {
-            os_log("⚠️ LibGit2: Checkout failed (error: \(checkoutResult))")
+            os_log("⚠️ LibGit2: Checkout tree failed (error: \(checkoutResult))")
+            throw LibGit2Error.checkoutFailed(branch)
+        }
+
+        // 检出成功后，设置 HEAD 指向目标分支
+        let setHeadResult = git_repository_set_head(repo, branchRef)
+        if setHeadResult != 0 {
+            os_log("⚠️ LibGit2: Set head failed (error: \(setHeadResult))")
             throw LibGit2Error.checkoutFailed(branch)
         }
 

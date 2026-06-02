@@ -433,7 +433,7 @@ extension LibGit2 {
 
             var checkoutOpts = git_checkout_options()
             git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-            checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue |
+            checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue |
                                             GIT_CHECKOUT_RECREATE_MISSING.rawValue
             // 快进后直接 checkout 新的 HEAD，让 libgit2 同步 branch ref、index 和 working tree。
             let checkoutResult = git_checkout_head(repo, &checkoutOpts)

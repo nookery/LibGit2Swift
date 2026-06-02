@@ -288,20 +288,36 @@ final class CheckoutTests: LibGit2SwiftTestCase {
             message: "Initial commit"
         )
 
-        // 创建新分支
+        // 创建新分支并切换，在新分支上提交不同的内容
         let branchName = TestDataGenerator.randomBranchName()
-        try LibGit2.createBranch(named: branchName, at: testRepo.repositoryPath)
+        try LibGit2.checkoutNewBranch(named: branchName, at: testRepo.repositoryPath)
 
-        // 在主分支修改文件
-        let fileURL = testRepo.tempDirectory.appendingPathComponent("shared.txt")
-        try "Modified in master".write(to: fileURL, atomically: true, encoding: .utf8)
+        let sharedURL = testRepo.tempDirectory.appendingPathComponent("shared.txt")
+        try "Modified on feature branch".write(to: sharedURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["shared.txt"], at: testRepo.repositoryPath)
+        try LibGit2.createCommit(message: "Change on feature", at: testRepo.repositoryPath, verbose: false)
 
-        // 尝试切换分支（应该失败或警告，因为有未提交的更改）
-        // libgit2 可能会允许切换，如果文件在目标分支中不同
-        // 这里我们测试行为不崩溃
-        XCTAssertNoThrow(
+        // 切换回 main
+        let mainBranch = try LibGit2.getCurrentBranch(at: testRepo.repositoryPath) == branchName
+            ? "main" : try LibGit2.getCurrentBranch(at: testRepo.repositoryPath)
+        // 获取初始分支
+        let branches = try LibGit2.getBranchList(at: testRepo.repositoryPath, includeRemote: false)
+        let initialBranch = branches.first(where: { $0.name != branchName })?.name ?? "main"
+        try LibGit2.checkout(branch: initialBranch, at: testRepo.repositoryPath)
+
+        // 在 main 上修改同一个文件（未提交）
+        try "Modified on main (uncommitted)".write(to: sharedURL, atomically: true, encoding: .utf8)
+
+        // 尝试切换到 feature 分支：应该失败，因为未提交的修改与目标分支冲突
+        XCTAssertThrowsError(
             try LibGit2.checkout(branch: branchName, at: testRepo.repositoryPath)
-        )
+        ) { error in
+            XCTAssertTrue(error is LibGit2Error, "Should throw LibGit2Error for conflicting uncommitted changes")
+        }
+
+        // 验证文件内容未被覆盖
+        let content = try String(contentsOf: sharedURL, encoding: .utf8)
+        XCTAssertEqual(content, "Modified on main (uncommitted)", "Uncommitted changes should be preserved")
     }
 
     // MARK: - File State After Checkout Tests
@@ -482,24 +498,27 @@ final class CheckoutTests: LibGit2SwiftTestCase {
 
     // MARK: - Checkout with Conflicts Tests
 
-    func testCheckoutBranchWithUncommittedChanges() throws {
-        // 创建提交
+    func testCheckoutBranchWithUncommittedNonConflictingChanges() throws {
+        // 当两个分支指向同一个 commit 时，未提交的修改不冲突，切换应成功
         try testRepo.createFileAndCommit(
             fileName: "file.txt",
             content: "Original",
             message: "Initial commit"
         )
 
-        // 创建分支
+        // 创建分支（指向同一个 commit）
         let branch2 = "branch2"
         _ = try LibGit2.createBranch(named: branch2, at: testRepo.repositoryPath)
 
-        // 修改文件（未提交）
+        // 修改文件（未提交，但目标分支的文件内容与当前 HEAD 相同）
         try "Modified".write(to: testRepo.tempDirectory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
 
-        // 切换分支（应该成功或警告有未提交变更）
-        // checkout with uncommitted changes可能会保留变更或抛出警告
+        // 切换分支应该成功，因为目标分支和当前分支的文件内容一致
         XCTAssertNoThrow(try LibGit2.checkout(branch: branch2, at: testRepo.repositoryPath, verbose: false))
+
+        // 验证未提交的修改被保留
+        let content = try String(contentsOf: testRepo.tempDirectory.appendingPathComponent("file.txt"), encoding: .utf8)
+        XCTAssertEqual(content, "Modified", "Non-conflicting uncommitted changes should be preserved")
     }
 
     // MARK: - Checkout New Branch Tests
@@ -543,5 +562,68 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         XCTAssertThrowsError(try LibGit2.checkoutNewBranch(named: "newbranch", at: testRepo.repositoryPath, verbose: false)) { error in
             XCTAssertTrue(error is LibGit2Error)
         }
+    }
+
+    // MARK: - Uncommitted Changes Protection Tests
+
+    func testCheckoutBranchWithUncommittedNewFile() throws {
+        // 未提交的新文件（不在目标分支中）不应阻止切换
+        try testRepo.createFileAndCommit(
+            fileName: "file.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let branchName = TestDataGenerator.randomBranchName()
+        try LibGit2.checkoutNewBranch(named: branchName, at: testRepo.repositoryPath)
+
+        // 在 feature 分支上提交不同的 file.txt
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("file.txt")
+        try "Feature content".write(to: fileURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["file.txt"], at: testRepo.repositoryPath)
+        try LibGit2.createCommit(message: "Feature change", at: testRepo.repositoryPath, verbose: false)
+
+        // 切换回 main
+        let branches = try LibGit2.getBranchList(at: testRepo.repositoryPath, includeRemote: false)
+        let mainBranch = branches.first(where: { $0.name != branchName })?.name ?? "main"
+        try LibGit2.checkout(branch: mainBranch, at: testRepo.repositoryPath)
+
+        // 创建新文件（untracked，不冲突）
+        let newFileURL = testRepo.tempDirectory.appendingPathComponent("newfile.txt")
+        try "New file content".write(to: newFileURL, atomically: true, encoding: .utf8)
+
+        // 切换到 feature 分支应该成功（新文件不冲突）
+        XCTAssertNoThrow(try LibGit2.checkout(branch: branchName, at: testRepo.repositoryPath))
+
+        // 新文件应该被保留
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newFileURL.path), "Untracked file should be preserved")
+    }
+
+    func testCheckoutBranchDiscardsWhenFileNotModified() throws {
+        // 验证：文件在两个分支中不同，但工作区未修改（与当前 HEAD 一致）
+        // 此时切换应该成功并更新工作区到目标分支的版本
+        try testRepo.createFileAndCommit(
+            fileName: "data.txt",
+            content: "Version A",
+            message: "Initial commit"
+        )
+
+        let featureBranch = "feature-branch"
+        try LibGit2.checkoutNewBranch(named: featureBranch, at: testRepo.repositoryPath)
+
+        // 在 feature 分支上修改并提交
+        let dataURL = testRepo.tempDirectory.appendingPathComponent("data.txt")
+        try "Version B".write(to: dataURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["data.txt"], at: testRepo.repositoryPath)
+        try LibGit2.createCommit(message: "Change to B", at: testRepo.repositoryPath, verbose: false)
+
+        // 切换回 main（工作区干净，应成功）
+        let branches = try LibGit2.getBranchList(at: testRepo.repositoryPath, includeRemote: false)
+        let mainBranch = branches.first(where: { $0.name != featureBranch })?.name ?? "main"
+        try LibGit2.checkout(branch: mainBranch, at: testRepo.repositoryPath)
+
+        // 验证文件内容已恢复到 main 的版本
+        let content = try String(contentsOf: dataURL, encoding: .utf8)
+        XCTAssertEqual(content, "Version A", "File should match main branch version after checkout")
     }
 }
