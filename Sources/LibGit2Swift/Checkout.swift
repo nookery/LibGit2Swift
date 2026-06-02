@@ -41,9 +41,8 @@ extension LibGit2 {
         // 检出工作目录到 HEAD
         var checkoutOpts = git_checkout_options()
         git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-        // 使用 FORCE 策略确保工作目录被正确更新
-        checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue
-
+        // 使用 SAFE 策略：存在冲突的未提交变更时返回错误，而非强制覆盖
+        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue | GIT_CHECKOUT_RECREATE_MISSING.rawValue
         let checkoutResult = git_checkout_head(repo, &checkoutOpts)
         if checkoutResult != 0 {
             os_log("⚠️ LibGit2: Checkout failed (error: \(checkoutResult))")
