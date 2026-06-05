@@ -266,7 +266,6 @@ extension LibGit2 {
         }
 
         var mergeHeadCommit: OpaquePointer? = nil
-        defer { if mergeHeadCommit != nil { git_commit_free(mergeHeadCommit) } }
 
         guard git_commit_lookup(&mergeHeadCommit, repo, &mergeHeadOID) == 0 else {
             throw LibGit2Error.mergeConflict
@@ -279,7 +278,6 @@ extension LibGit2 {
         }
 
         var headCommit: OpaquePointer? = nil
-        defer { if headCommit != nil { git_commit_free(headCommit) } }
 
         guard git_commit_lookup(&headCommit, repo, &headOID) == 0 else {
             throw LibGit2Error.cannotGetHEAD
@@ -313,7 +311,7 @@ extension LibGit2 {
         let message = "Merge branch '\(branchName)'"
 
         // 创建提交（两个父提交）
-        var parents = [OpaquePointer?]()
+        var parents = [headCommit, mergeHeadCommit]
         defer {
             for parent in parents {
                 if parent != nil {
@@ -322,23 +320,22 @@ extension LibGit2 {
             }
         }
 
-        parents.append(headCommit)
-        parents.append(mergeHeadCommit)
-
         var commitOID = git_oid()
 
-        let result = git_commit_create(
-            &commitOID,
-            repo,
-            "HEAD",
-            signature,
-            signature,
-            nil,
-            message,
-            tree,
-            2,
-            &parents
-        )
+        let result = parents.withUnsafeMutableBufferPointer { buffer in
+            git_commit_create(
+                &commitOID,
+                repo,
+                "HEAD",
+                signature,
+                signature,
+                nil,
+                message,
+                tree,
+                buffer.count,
+                buffer.baseAddress
+            )
+        }
 
         if result != 0 {
             throw LibGit2Error.commitFailed
