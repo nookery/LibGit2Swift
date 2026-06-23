@@ -806,6 +806,58 @@ final class RemoteTests: LibGit2SwiftTestCase {
         )
     }
 
+    func testPullFastForwardRefusesToOverwriteLocalChanges() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibGit2SwiftPullDirtyTests")
+            .appendingPathComponent(UUID().uuidString)
+        let remoteURL = rootURL.appendingPathComponent("remote.git")
+        let seedURL = rootURL.appendingPathComponent("seed")
+        let localURL = rootURL.appendingPathComponent("local")
+
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        try runGit(["init", "--bare", remoteURL.path], in: rootURL)
+        try runGit(["init", "--initial-branch=main", seedURL.path], in: rootURL)
+        try runGit(["config", "user.name", "Test User"], in: seedURL)
+        try runGit(["config", "user.email", "test@example.com"], in: seedURL)
+
+        let trackedFileURL = seedURL.appendingPathComponent("README.md")
+        try "v1\n".write(to: trackedFileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: seedURL)
+        try runGit(["commit", "-m", "Initial commit"], in: seedURL)
+        try runGit(["remote", "add", "origin", remoteURL.path], in: seedURL)
+        try runGit(["push", "-u", "origin", "main"], in: seedURL)
+
+        try runGit(["clone", remoteURL.path, localURL.path], in: rootURL)
+
+        try "v2\n".write(to: trackedFileURL, atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: seedURL)
+        try runGit(["commit", "-m", "Update readme"], in: seedURL)
+        try runGit(["push", "origin", "main"], in: seedURL)
+
+        let localReadmeURL = localURL.appendingPathComponent("README.md")
+        try "local edit\n".write(to: localReadmeURL, atomically: true, encoding: .utf8)
+
+        let headBeforePull = try runGit(["rev-parse", "HEAD"], in: localURL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        XCTAssertThrowsError(try LibGit2.pull(at: localURL.path, verbose: false)) { error in
+            guard case LibGit2Error.localChangesWouldBeOverwritten = error else {
+                XCTFail("Expected localChangesWouldBeOverwritten, got \(error)")
+                return
+            }
+        }
+
+        let localContent = try String(contentsOf: localReadmeURL, encoding: .utf8)
+        XCTAssertEqual(localContent, "local edit\n", "Local edits should be preserved after failed pull")
+
+        let headAfterPull = try runGit(["rev-parse", "HEAD"], in: localURL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(headAfterPull, headBeforePull, "Branch should roll back when checkout is blocked")
+    }
+
     /// 测试大量提交时的性能
     func testGetUnPushedCommitsWithLargeHistory() throws {
         // 创建大量提交来测试性能
