@@ -119,36 +119,15 @@ extension LibGit2 {
             throw LibGit2Error.mergeConflict
         }
 
-        // 执行快进
-        var headRef: OpaquePointer? = nil
-        defer { if headRef != nil { git_reference_free(headRef) } }
+        var mergeOpts = git_merge_options()
+        git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
 
-        if git_reference_lookup(&headRef, repo, "HEAD") == 0 {
-            var updatedRef: OpaquePointer? = nil
-            git_reference_set_target(&updatedRef, headRef!, &branchOID, "merge: fast-forward")
-            git_reference_free(updatedRef)
+        var checkoutOpts = makeSafeCheckoutOptions()
+        let mergeResult = git_merge(repo, &annotatedCommit, 1, &mergeOpts, &checkoutOpts)
+        if mergeResult != 0 {
+            throw errorFromCheckoutResult(mergeResult, context: branchName)
         }
-
-        // 更新工作目录
-        var headCommit: OpaquePointer? = nil
-        defer { if headCommit != nil { git_commit_free(headCommit) } }
-
-        git_commit_lookup(&headCommit, repo, &branchOID)
-
-        if let commit = headCommit {
-            var tree: OpaquePointer? = nil
-            defer { if tree != nil { git_tree_free(tree) } }
-
-            git_commit_tree(&tree, commit)
-
-            if let treePtr = tree {
-                var checkoutOpts = git_checkout_options()
-                git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-                checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-
-                git_checkout_tree(repo, treePtr, &checkoutOpts)
-            }
-        }
+        git_repository_state_cleanup(repo)
 
         if verbose { os_log("\(self.t)Fast-forward merge completed") }
     }

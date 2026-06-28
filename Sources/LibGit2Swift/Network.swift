@@ -421,24 +421,46 @@ extension LibGit2 {
         }
 
         if analysis.rawValue & GIT_MERGE_ANALYSIS_FASTFORWARD.rawValue != 0 {
-            // 快进合并
-            var reference: OpaquePointer? = nil
-            defer { if reference != nil { git_reference_free(reference) } }
+            let hasLocalChanges = try hasUncommittedChanges(at: path, verbose: false)
 
-            if git_reference_lookup(&reference, repo, headRef) == 0 {
+            if hasLocalChanges {
+                var mergeOpts = git_merge_options()
+                git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
+
+                var checkoutOpts = makeSafeCheckoutOptions()
+                let mergeResult = git_merge(repo, &remoteAnnotatedCommit, 1, &mergeOpts, &checkoutOpts)
+                if mergeResult != 0 {
+                    throw errorFromCheckoutResult(mergeResult, context: "pull")
+                }
+                git_repository_state_cleanup(repo)
+            } else {
+                var reference: OpaquePointer? = nil
+                defer { if reference != nil { git_reference_free(reference) } }
+
+                guard git_reference_lookup(&reference, repo, headRef) == 0, let reference else {
+                    throw LibGit2Error.pullFailed("Failed to lookup branch reference for fast-forward")
+                }
+
                 var updatedRef: OpaquePointer? = nil
-                git_reference_set_target(&updatedRef, reference!, &remoteOID, "pull: fast-forward")
+                let setTargetResult = git_reference_set_target(
+                    &updatedRef,
+                    reference,
+                    &remoteOID,
+                    "pull: fast-forward"
+                )
                 git_reference_free(updatedRef)
-            }
+                if setTargetResult != 0 {
+                    throw LibGit2Error.pullFailed("Failed to fast-forward branch reference")
+                }
 
-            var checkoutOpts = git_checkout_options()
-            git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-            checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue |
-                                            GIT_CHECKOUT_RECREATE_MISSING.rawValue
-            // 快进后直接 checkout 新的 HEAD，让 libgit2 同步 branch ref、index 和 working tree。
-            let checkoutResult = git_checkout_head(repo, &checkoutOpts)
-            if checkoutResult != 0 {
-                throw LibGit2Error.pullFailed("Failed to update working tree after fast-forward")
+                var checkoutOpts = git_checkout_options()
+                git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+                checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue |
+                    GIT_CHECKOUT_RECREATE_MISSING.rawValue
+                let checkoutResult = git_checkout_head(repo, &checkoutOpts)
+                if checkoutResult != 0 {
+                    throw LibGit2Error.pullFailed("Failed to update working tree after fast-forward")
+                }
             }
         } else if analysis.rawValue & GIT_MERGE_ANALYSIS_NORMAL.rawValue != 0 {
             // 需要普通合并

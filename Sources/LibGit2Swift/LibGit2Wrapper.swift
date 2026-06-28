@@ -255,6 +255,7 @@ public enum LibGit2Error: Error, LocalizedError {
     case invalidReference
     case networkError(Int)
     case authenticationError
+    case localChangesWouldBeOverwritten(message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -302,6 +303,8 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Network error occurred: \(code)"
         case .authenticationError:
             return "Authentication failed"
+        case let .localChangesWouldBeOverwritten(message):
+            return message
         }
     }
 
@@ -313,6 +316,8 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Please check your network connection"
         case .mergeConflict:
             return "Please resolve conflicts before continuing"
+        case .localChangesWouldBeOverwritten:
+            return "Commit or stash your changes before continuing"
         default:
             return nil
         }

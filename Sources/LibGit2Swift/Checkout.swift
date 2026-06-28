@@ -345,4 +345,31 @@ extension LibGit2 {
         // 切换到新分支
         try checkout(branch: localName, at: path)
     }
+
+    static func makeSafeCheckoutOptions() -> git_checkout_options {
+        var checkoutOpts = git_checkout_options()
+        git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue | GIT_CHECKOUT_RECREATE_MISSING.rawValue
+        return checkoutOpts
+    }
+
+    static func errorFromCheckoutResult(_ result: Int32, context: String) -> LibGit2Error {
+        var message = "Checkout failed during \(context)"
+        if let error = git_error_last() {
+            let libMessage = String(cString: error.pointee.message)
+            if libMessage.isEmpty == false {
+                message = libMessage
+            }
+        }
+
+        if result == GIT_ECONFLICT.rawValue || result == GIT_EINDEXDIRTY.rawValue {
+            return .localChangesWouldBeOverwritten(message: message)
+        }
+
+        if context == "pull" {
+            return .pullFailed(message)
+        }
+
+        return .checkoutFailed(context)
+    }
 }
