@@ -271,7 +271,8 @@ extension LibGit2 {
     ) -> GitCommit? {
         // 获取提交 ID
         let oid = git_commit_id(commit)
-        let hash = oidToString(oid!.pointee)
+        guard let oid else { return nil }
+        let hash = oidToString(oid.pointee)
 
         // 获取作者信息
         let authorPtr = git_commit_author(commit)

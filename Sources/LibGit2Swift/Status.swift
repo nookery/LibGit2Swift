@@ -28,7 +28,8 @@ extension LibGit2 {
             throw LibGit2Error.cannotGetStatus
         }
 
-        let count = git_status_list_entrycount(statusList!)
+        guard let statusList else { return false }
+        let count = git_status_list_entrycount(statusList)
 
         if verbose { os_log("\(t)Uncommitted changes count: \(count)") }
 
@@ -58,10 +59,11 @@ extension LibGit2 {
         }
 
         var output = ""
-        let count = git_status_list_entrycount(statusList!)
+        guard let statusList else { return "" }
+        let count = git_status_list_entrycount(statusList)
 
         for i in 0..<count {
-            if let entry = git_status_byindex(statusList!, i) {
+            if let entry = git_status_byindex(statusList, i) {
                 let status = entry.pointee.status
 
                 // 解析状态标志
@@ -137,10 +139,11 @@ extension LibGit2 {
         }
 
         var output = ""
-        let count = git_status_list_entrycount(statusList!)
+        guard let statusList else { return "" }
+        let count = git_status_list_entrycount(statusList)
 
         for i in 0..<count {
-            if let entry = git_status_byindex(statusList!, i) {
+            if let entry = git_status_byindex(statusList, i) {
                 let status = entry.pointee.status
 
                 let statusRaw = status.rawValue
@@ -217,10 +220,11 @@ extension LibGit2 {
         }
 
         var files: [String] = []
-        let count = git_status_list_entrycount(statusList!)
+        guard let statusList else { return [] }
+        let count = git_status_list_entrycount(statusList)
 
         for i in 0..<count {
-            if let entry = git_status_byindex(statusList!, i) {
+            if let entry = git_status_byindex(statusList, i) {
                 let status = entry.pointee.status
                 let statusRaw = status.rawValue
                 // 检查是否有索引变更
@@ -265,10 +269,11 @@ extension LibGit2 {
         }
 
         var files: [String] = []
-        let count = git_status_list_entrycount(statusList!)
+        guard let statusList else { return [] }
+        let count = git_status_list_entrycount(statusList)
 
         for i in 0..<count {
-            if let entry = git_status_byindex(statusList!, i) {
+            if let entry = git_status_byindex(statusList, i) {
                 let status = entry.pointee.status
                 let statusRaw = status.rawValue
                 // 检查是否有工作区变更

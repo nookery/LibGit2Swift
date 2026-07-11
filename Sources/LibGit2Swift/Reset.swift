@@ -103,14 +103,15 @@ extension LibGit2 {
         }
 
         // 从 index 中移除文件
-        let result = git_index_remove_bypath(index!, filePath)
+        guard let index else { return }
+        let result = git_index_remove_bypath(index, filePath)
 
         if result != 0 {
             // 文件可能不在 index 中
             if verbose { os_log("⚠️ LibGit2: File not in index: %{public}@", filePath) }
         }
 
-        git_index_write(index!)
+        git_index_write(index)
 
         if verbose { os_log("🐚 LibGit2: File reset: %{public}@", filePath) }
     }
@@ -133,8 +134,7 @@ extension LibGit2 {
         }
 
         // 清空 index
-        git_index_clear(index!)
-        git_index_write(index!)
+        if let index { git_index_clear(index); git_index_write(index) }
 
         if verbose { os_log("🐚 LibGit2: All staged files reset") }
     }

@@ -147,13 +147,14 @@ extension LibGit2 {
         }
 
         var conflictFiles: [String] = []
-        let count = git_index_entrycount(index!)
+        guard let index else { return [] }
+        let count = git_index_entrycount(index)
 
         for i in 0..<count {
-            let entry = git_index_get_byindex(index!, i)
+            let entry = git_index_get_byindex(index, i)
 
             if entry != nil && git_index_entry_is_conflict(entry!) == 1 {
-                if let path = entry!.pointee.path {
+                if let path = entry?.pointee.path {
                     conflictFiles.append(String(cString: path))
                 }
             }
@@ -201,7 +202,8 @@ extension LibGit2 {
             defer { if headCommit != nil { git_commit_free(headCommit) } }
 
             if git_commit_lookup(&headCommit, repo, &headOID) == 0 {
-                git_reset(repo, headCommit!, GIT_RESET_HARD, nil)
+                guard let headCommit else { return }
+                git_reset(repo, headCommit, GIT_RESET_HARD, nil)
             }
         }
 
@@ -294,7 +296,7 @@ extension LibGit2 {
         defer {
             for parent in parents {
                 if parent != nil {
-                    git_commit_free(parent!)
+                    if let parent { git_commit_free(parent) }
                 }
             }
         }

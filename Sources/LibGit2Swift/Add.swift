@@ -36,10 +36,11 @@ extension LibGit2 {
             defer { if statusList != nil { git_status_list_free(statusList) } }
 
             if git_status_list_new(&statusList, repo, &statusOpts) == 0 {
-                let count = git_status_list_entrycount(statusList!)
+                guard let statusList else { return }
+                let count = git_status_list_entrycount(statusList)
 
                 for i in 0..<count {
-                    if let entry = git_status_byindex(statusList!, i) {
+                    if let entry = git_status_byindex(statusList, i) {
                         let status = entry.pointee.status
                         let statusRaw = status.rawValue
                         // 只处理工作区的变更

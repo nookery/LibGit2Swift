@@ -83,7 +83,8 @@ extension LibGit2 {
             defer { free(pathC) }
             var pathspecStrings: [UnsafeMutablePointer<CChar>?] = [pathC]
             pathspecStrings.withUnsafeMutableBufferPointer { buffer in
-                var spec = git_strarray(strings: buffer.baseAddress!, count: 1)
+                guard let baseAddr = buffer.baseAddress else { return }
+                var spec = git_strarray(strings: baseAddr, count: 1)
                 opts.pathspec = spec
                 git_diff_index_to_workdir(&diff, repo, index, &opts)
             }
@@ -115,8 +116,8 @@ extension LibGit2 {
                     continue
                 }
 
-                let headerData = withUnsafeBytes(of: hunkInfo.pointee.header) {
-                    Data(bytes: $0.baseAddress!, count: $0.count)
+                let headerData = withUnsafeBytes(of: hunkInfo.pointee.header) { ptr in
+                    Data(bytes: ptr.baseAddress!, count: ptr.count)
                 }
                 let header = String(data: headerData, encoding: .utf8)?.split(separator: "\0").first.map(String.init) ?? ""
                 let oldStart = Int(hunkInfo.pointee.old_start)
@@ -231,11 +232,11 @@ extension LibGit2 {
                     } else {
                         try? data.write(to: URL(fileURLWithPath: fullPath))
                     }
-                    git_index_add_bypath(index!, file)
+                    if let index { git_index_add_bypath(index, file) }
                 }
             }
         }
-        git_index_write(index!)
+        if let index { git_index_write(index) }
     }
 
     private static func repoPathFromRepo(_ repo: OpaquePointer) -> String {

@@ -161,7 +161,8 @@ extension LibGit2 {
             if git_tag_lookup(&tag, repo, target) == 0, let tagPtr = tag {
                 // 带注释的标签
                 let targetOID = git_tag_target_id(tagPtr)
-                return oidToString(targetOID!.pointee)
+                guard let targetOID else { return "" }
+                return oidToString(targetOID.pointee)
             } else {
                 // 轻量标签，直接指向 commit
                 return oidToString(target.pointee)

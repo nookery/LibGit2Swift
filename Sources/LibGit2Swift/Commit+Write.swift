@@ -55,7 +55,7 @@ extension LibGit2 {
         defer {
             for parent in parents {
                 if parent != nil {
-                    git_commit_free(parent!)
+                    if let parent { git_commit_free(parent) }
                 }
             }
         }

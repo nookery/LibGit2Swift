@@ -343,8 +343,9 @@ extension LibGit2 {
             if toTree != nil { git_tree_free(toTree) }
         }
 
-        guard git_commit_tree(&fromTree, fromCommit!) == 0,
-              git_commit_tree(&toTree, toCommit!) == 0 else {
+        guard let fromCommit, let toCommit,
+              git_commit_tree(&fromTree, fromCommit) == 0,
+              git_commit_tree(&toTree, toCommit) == 0 else {
             throw LibGit2Error.invalidValue
         }
 
@@ -684,15 +685,21 @@ extension LibGit2 {
 
             let filePath: String
             if deltaType == GIT_DELTA_ADDED {
-                filePath = String(cString: newPath!)
+                guard let newPath else { continue }
+                filePath = String(cString: newPath)
             } else if deltaType == GIT_DELTA_DELETED {
-                filePath = String(cString: oldPath!)
-            } else if oldPath != nil && newPath != nil {
-                let oldPathStr = String(cString: oldPath!)
-                let newPathStr = String(cString: newPath!)
+                guard let oldPath else { continue }
+                filePath = String(cString: oldPath)
+            } else if let oldPath, let newPath {
+                let oldPathStr = String(cString: oldPath)
+                let newPathStr = String(cString: newPath)
                 filePath = oldPathStr == newPathStr ? oldPathStr : "\(oldPathStr) -> \(newPathStr)"
+            } else if let oldPath {
+                filePath = String(cString: oldPath)
+            } else if let newPath {
+                filePath = String(cString: newPath)
             } else {
-                filePath = String(cString: oldPath ?? newPath!)
+                continue
             }
 
             // 检测二进制文件：双重检测策略

@@ -145,8 +145,7 @@ extension LibGit2 {
         }
 
         // 更新 index
-        git_index_add_bypath(index!, filePath)
-        git_index_write(index!)
+        if let index { git_index_add_bypath(index, filePath); git_index_write(index) }
 
         if verbose { os_log("🐚 LibGit2: File checked out: %{public}@", filePath) }
     }

@@ -249,7 +249,8 @@ extension LibGit2 {
             throw LibGit2Error.invalidReference
         }
 
-        let deleteResult = git_branch_delete(branchRef!)
+        guard let branchRef else { throw LibGit2Error.invalidReference }
+        let deleteResult = git_branch_delete(branchRef)
 
         if deleteResult != 0 {
             throw LibGit2Error.checkoutFailed(name)
@@ -278,7 +279,8 @@ extension LibGit2 {
         var newRef: OpaquePointer? = nil
         defer { if newRef != nil { git_reference_free(newRef) } }
 
-        let renameResult = git_branch_move(&newRef, branchRef!, newName, force ? 1 : 0)
+        guard let branchRef else { throw LibGit2Error.invalidReference }
+        let renameResult = git_branch_move(&newRef, branchRef, newName, force ? 1 : 0)
 
         if renameResult != 0 {
             throw LibGit2Error.checkoutFailed(newName)
