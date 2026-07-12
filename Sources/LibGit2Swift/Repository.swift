@@ -30,7 +30,12 @@ extension LibGit2 {
     /// - Returns: 如果是 Git 仓库返回 true，否则返回 false
     public static func isGitRepository(at path: String) -> Bool {
         var repo: OpaquePointer? = nil
-        let result = git_repository_open_ext(&repo, path, GIT_REPOSITORY_OPEN_NO_SEARCH.rawValue, nil)
+        // 使用默认 flag (0)，允许向上搜索找到仓库根目录
+        // 这比 GIT_REPOSITORY_OPEN_NO_SEARCH 更宽容：
+        // - 仓库根目录 → 成功
+        // - 子目录 → 成功（向上搜索找到仓库）
+        // - 非 Git 目录 → 失败
+        let result = git_repository_open_ext(&repo, path, 0, nil)
 
         if repo != nil {
             git_repository_free(repo)
