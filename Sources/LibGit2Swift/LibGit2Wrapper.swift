@@ -9,18 +9,55 @@ import OSLog
 /// 提供类型安全的接口和自动内存管理
 public class LibGit2: SuperLog {
     public static let emoji = "🗂️"
-    /// 初始化 libgit2（应用启动时调用一次）
-    public static func initialize() {
-        git_libgit2_init()
 
-        // 注意：git_libgit2_opts 是可变参数函数，在 Swift 中不可直接调用
-        // 大多数情况下 libgit2 会自动找到正确的 HOME 目录
-        // 如果需要设置 HOMEDIR，可以通过环境变量实现
+    /// 内部状态：libgit2 引用计数 + 保护锁
+    ///
+    /// libgit2 要求 `git_libgit2_init()` / `git_libgit2_shutdown()` 成对调用，
+    /// 多次 init 必须匹配相同次数的 shutdown。这里用引用计数 + OSAllocatedUnfairLock
+    /// 保证幂等与线程安全：第一次 init 时调用 C 层 init，后续 init 只递增计数；
+    /// shutdown 把计数减到 0 时才真正调 C 层 shutdown。
+    private struct State {
+        var refCount: Int = 0
     }
 
-    /// 清理 libgit2（应用退出时调用）
+    private static let initLock = OSAllocatedUnfairLock<State>(initialState: State())
+
+    /// 当前已初始化次数（仅供诊断/测试用）
+    public static var initializationCount: Int {
+        initLock.withLock { $0.refCount }
+    }
+
+    /// 初始化 libgit2（应用启动时调用一次）。
+    ///
+    /// 幂等且线程安全：可从任意线程、任意时机重复调用；内部用引用计数保证
+    /// `git_libgit2_init()` 只在首次调用时真正触发 C 层。
+    public static func initialize() {
+        let shouldCallC = initLock.withLock { state -> Bool in
+            state.refCount += 1
+            return state.refCount == 1
+        }
+
+        if shouldCallC {
+            git_libgit2_init()
+            // 注意：git_libgit2_opts 是可变参数函数，在 Swift 中不可直接调用
+            // 大多数情况下 libgit2 会自动找到正确的 HOME 目录
+            // 如果需要设置 HOMEDIR，可以通过环境变量实现
+        }
+    }
+
+    /// 清理 libgit2（应用退出时调用）。
+    ///
+    /// 幂等且线程安全：必须与 `initialize()` 的调用次数配对；只有最后一次
+    /// shutdown（即计数从 1 减到 0）才真正调用 C 层 shutdown。
     public static func shutdown() {
-        git_libgit2_shutdown()
+        let shouldCallC = initLock.withLock { state -> Bool in
+            state.refCount = max(0, state.refCount - 1)
+            return state.refCount == 0
+        }
+
+        if shouldCallC {
+            git_libgit2_shutdown()
+        }
     }
 
     /// 当前链接的 libgit2 版本。
