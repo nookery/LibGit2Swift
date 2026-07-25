@@ -46,85 +46,87 @@ extension LibGit2 {
         at path: String,
         fromCommit commitHash: String? = nil
     ) throws -> [GitBlameLine] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var opts = git_blame_options()
-        git_blame_options_init(&opts, UInt32(GIT_BLAME_OPTIONS_VERSION))
+            var opts = git_blame_options()
+            git_blame_options_init(&opts, UInt32(GIT_BLAME_OPTIONS_VERSION))
 
-        if let commitHash {
-            var oid = git_oid()
-            guard git_oid_fromstr(&oid, commitHash) == 0 else {
+            if let commitHash {
+                var oid = git_oid()
+                guard git_oid_fromstr(&oid, commitHash) == 0 else {
+                    throw LibGit2Error.invalidValue
+                }
+                opts.newest_commit = oid
+            }
+
+            var blame: OpaquePointer?
+            defer { if blame != nil { git_blame_free(blame) } }
+
+            let result = filePath.withCString { filePathC in
+                git_blame_file(&blame, repo, filePathC, &opts)
+            }
+
+            guard result == 0, let blamePtr = blame else {
                 throw LibGit2Error.invalidValue
             }
-            opts.newest_commit = oid
-        }
 
-        var blame: OpaquePointer?
-        defer { if blame != nil { git_blame_free(blame) } }
+            let hunkCount = git_blame_get_hunk_count(blamePtr)
+            var lines: [GitBlameLine] = []
 
-        let result = filePath.withCString { filePathC in
-            git_blame_file(&blame, repo, filePathC, &opts)
-        }
+            // 读取文件内容
+            let fullContent = fileContentFromWorkingTree(filePath: filePath, repoPath: path)
+                ?? fileContentFromHEAD(filePath: filePath, repo: repo)
+            let contentLines = fullContent.components(separatedBy: "\n")
 
-        guard result == 0, let blamePtr = blame else {
-            throw LibGit2Error.invalidValue
-        }
+            for i in 0..<hunkCount {
+                guard let hunk = git_blame_get_hunk_byindex(blamePtr, i) else { continue }
 
-        let hunkCount = git_blame_get_hunk_count(blamePtr)
-        var lines: [GitBlameLine] = []
+                let hunkStart = Int(hunk.pointee.final_start_line_number)
+                let lineCount = Int(hunk.pointee.lines_in_hunk)
+                let isBoundary = hunk.pointee.boundary != 0
 
-        // 读取文件内容
-        let fullContent = fileContentFromWorkingTree(filePath: filePath, repoPath: path)
-            ?? fileContentFromHEAD(filePath: filePath, repo: repo)
-        let contentLines = fullContent.components(separatedBy: "\n")
+                let author: String
+                let authorEmail: String
+                let authorDate: Date
 
-        for i in 0..<hunkCount {
-            guard let hunk = git_blame_get_hunk_byindex(blamePtr, i) else { continue }
-
-            let hunkStart = Int(hunk.pointee.final_start_line_number)
-            let lineCount = Int(hunk.pointee.lines_in_hunk)
-            let isBoundary = hunk.pointee.boundary != 0
-
-            let author: String
-            let authorEmail: String
-            let authorDate: Date
-
-            if let sig = hunk.pointee.final_signature {
-                author = sig.pointee.name.map { String(cString: $0) } ?? ""
-                authorEmail = sig.pointee.email.flatMap { String(cString: $0) } ?? ""
-                authorDate = Date(timeIntervalSince1970: TimeInterval(sig.pointee.when.time))
-            } else {
-                author = ""
-                authorEmail = ""
-                authorDate = Date(timeIntervalSince1970: 0)
-            }
-
-            let commitHashStr = oidToString(hunk.pointee.final_commit_id)
-
-            for lineOffset in 0..<lineCount {
-                let lineNumber = hunkStart + lineOffset
-                let content: String
-                let lineIndex = lineNumber - 1
-                if lineIndex >= 0 && lineIndex < contentLines.count {
-                    content = contentLines[lineIndex]
+                if let sig = hunk.pointee.final_signature {
+                    author = sig.pointee.name.map { String(cString: $0) } ?? ""
+                    authorEmail = sig.pointee.email.flatMap { String(cString: $0) } ?? ""
+                    authorDate = Date(timeIntervalSince1970: TimeInterval(sig.pointee.when.time))
                 } else {
-                    content = ""
+                    author = ""
+                    authorEmail = ""
+                    authorDate = Date(timeIntervalSince1970: 0)
                 }
 
-                lines.append(GitBlameLine(
-                    lineNumber: lineNumber,
-                    commitHash: commitHashStr,
-                    author: author,
-                    authorEmail: authorEmail,
-                    authorDate: authorDate,
-                    content: content,
-                    isBoundary: isBoundary
-                ))
-            }
-        }
+                let commitHashStr = oidToString(hunk.pointee.final_commit_id)
 
-        return lines.sorted { $0.lineNumber < $1.lineNumber }
+                for lineOffset in 0..<lineCount {
+                    let lineNumber = hunkStart + lineOffset
+                    let content: String
+                    let lineIndex = lineNumber - 1
+                    if lineIndex >= 0 && lineIndex < contentLines.count {
+                        content = contentLines[lineIndex]
+                    } else {
+                        content = ""
+                    }
+
+                    lines.append(GitBlameLine(
+                        lineNumber: lineNumber,
+                        commitHash: commitHashStr,
+                        author: author,
+                        authorEmail: authorEmail,
+                        authorDate: authorDate,
+                        content: content,
+                        isBoundary: isBoundary
+                    ))
+                }
+            }
+
+            return lines.sorted { $0.lineNumber < $1.lineNumber }
+        }
     }
 
     // MARK: - Private

@@ -63,23 +63,27 @@ private func submoduleStatus(from rawStatus: UInt32) -> GitSubmoduleInfo.Status 
 
 extension LibGit2 {
     public static func submodules(at path: String) throws -> [GitSubmoduleInfo] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let payload = SubmoduleListPayload()
-        let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
+            let payload = SubmoduleListPayload()
+            let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
 
-        let result = git_submodule_foreach(repo, collectSubmoduleCallback, payloadPointer)
+            let result = git_submodule_foreach(repo, collectSubmoduleCallback, payloadPointer)
 
-        guard result == 0 else {
-            throw LibGit2Error.invalidReference
+            guard result == 0 else {
+                throw LibGit2Error.invalidReference
+            }
+
+            return payload.values.sorted { $0.path < $1.path }
         }
-
-        return payload.values.sorted { $0.path < $1.path }
     }
 
     public static func initializeSubmodules(paths: [String] = [], at path: String, recursive: Bool = true, verbose: Bool = true) throws {
-        try updateSubmodules(paths: paths, at: path, initialize: true, recursive: recursive, verbose: verbose)
+        try LibGit2.serialized {
+            try updateSubmodules(paths: paths, at: path, initialize: true, recursive: recursive, verbose: verbose)
+        }
     }
 
     public static func updateSubmodules(
@@ -89,51 +93,55 @@ extension LibGit2 {
         recursive: Bool = true,
         verbose: Bool = true
     ) throws {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let selectedPaths = Set(paths.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.isEmpty == false })
-        let targets = selectedPaths.isEmpty ? try submodules(at: path).map(\.path) : Array(selectedPaths)
+            let selectedPaths = Set(paths.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.isEmpty == false })
+            let targets = selectedPaths.isEmpty ? try submodules(at: path).map(\.path) : Array(selectedPaths)
 
-        for submodulePath in targets {
-            var submodule: OpaquePointer?
-            defer { if submodule != nil { git_submodule_free(submodule) } }
+            for submodulePath in targets {
+                var submodule: OpaquePointer?
+                defer { if submodule != nil { git_submodule_free(submodule) } }
 
-            guard git_submodule_lookup(&submodule, repo, submodulePath) == 0, let submodule else {
-                throw LibGit2Error.invalidReference
-            }
+                guard git_submodule_lookup(&submodule, repo, submodulePath) == 0, let submodule else {
+                    throw LibGit2Error.invalidReference
+                }
 
-            if initialize {
-                let initResult = git_submodule_init(submodule, 0)
-                if initResult != 0 && initResult != GIT_EEXISTS.rawValue {
+                if initialize {
+                    let initResult = git_submodule_init(submodule, 0)
+                    if initResult != 0 && initResult != GIT_EEXISTS.rawValue {
+                        throw LibGit2Error.checkoutFailed(submodulePath)
+                    }
+                }
+
+                var options = git_submodule_update_options()
+                git_submodule_update_options_init(&options, UInt32(GIT_SUBMODULE_UPDATE_OPTIONS_VERSION))
+                options.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+                options.fetch_opts.callbacks.credentials = gitCredentialCallback
+
+                let result = git_submodule_update(submodule, initialize ? 1 : 0, &options)
+                if result != 0 {
                     throw LibGit2Error.checkoutFailed(submodulePath)
                 }
-            }
-
-            var options = git_submodule_update_options()
-            git_submodule_update_options_init(&options, UInt32(GIT_SUBMODULE_UPDATE_OPTIONS_VERSION))
-            options.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-            options.fetch_opts.callbacks.credentials = gitCredentialCallback
-
-            let result = git_submodule_update(submodule, initialize ? 1 : 0, &options)
-            if result != 0 {
-                throw LibGit2Error.checkoutFailed(submodulePath)
             }
         }
     }
 
     public static func submoduleDiff(path submodulePath: String, at path: String) throws -> String {
-        guard let submodule = try submodules(at: path).first(where: { $0.path == submodulePath }) else {
-            throw LibGit2Error.invalidReference
-        }
+        return try LibGit2.serialized {
+            guard let submodule = try submodules(at: path).first(where: { $0.path == submodulePath }) else {
+                throw LibGit2Error.invalidReference
+            }
 
-        var lines = ["Submodule \(submodule.path) \(submodule.status.rawValue)"]
-        if submodule.commitHash.isEmpty == false {
-            lines.append("Commit: \(submodule.commitHash)")
+            var lines = ["Submodule \(submodule.path) \(submodule.status.rawValue)"]
+            if submodule.commitHash.isEmpty == false {
+                lines.append("Commit: \(submodule.commitHash)")
+            }
+            if let description = submodule.description, description.isEmpty == false {
+                lines.append("URL: \(description)")
+            }
+            return lines.joined(separator: "\n")
         }
-        if let description = submodule.description, description.isEmpty == false {
-            lines.append("URL: \(description)")
-        }
-        return lines.joined(separator: "\n")
     }
 }

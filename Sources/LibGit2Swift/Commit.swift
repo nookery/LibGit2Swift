@@ -26,7 +26,9 @@ extension LibGit2 {
     ///   - skip: 跳过的提交数量
     /// - Returns: 提交列表
     public static func getCommitList(at path: String, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        try getCommitList(at: path, scope: .head, limit: limit, skip: skip)
+        return try LibGit2.serialized {
+            try getCommitList(at: path, scope: .head, limit: limit, skip: skip)
+        }
     }
 
     /// 获取用于提交拓扑图的提交列表。
@@ -34,12 +36,16 @@ extension LibGit2 {
     /// 返回结果按拓扑优先、时间倒序遍历，并包含本地分支、远程分支和标签引用。
     /// GitOK 可基于 `parentHashes` 和 `refs` 在 UI 层计算 lane 与绘制连线。
     public static func getCommitGraphList(at path: String, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        try getCommitList(at: path, scope: .allReferences, limit: limit, skip: skip)
+        return try LibGit2.serialized {
+            try getCommitList(at: path, scope: .allReferences, limit: limit, skip: skip)
+        }
     }
 
     /// 分页获取用于提交拓扑图的提交列表。
     public static func getCommitGraphListWithPagination(at path: String, page: Int, size: Int) throws -> [GitCommit] {
-        try getCommitGraphList(at: path, limit: size, skip: page * size)
+        return try LibGit2.serialized {
+            try getCommitGraphList(at: path, limit: size, skip: page * size)
+        }
     }
 
     /// 获取提交列表
@@ -50,64 +56,66 @@ extension LibGit2 {
     ///   - skip: 跳过的提交数量
     /// - Returns: 提交列表
     public static func getCommitList(at path: String, scope: CommitTraversalScope, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var revwalk: OpaquePointer? = nil
-        defer { if revwalk != nil { git_revwalk_free(revwalk) } }
+            var revwalk: OpaquePointer? = nil
+            defer { if revwalk != nil { git_revwalk_free(revwalk) } }
 
-        let result = git_revwalk_new(&revwalk, repo)
+            let result = git_revwalk_new(&revwalk, repo)
 
-        guard result == 0, let walker = revwalk else {
-            throw LibGit2Error.cannotCreateRevwalk
-        }
-
-        git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue | GIT_SORT_TIME.rawValue)
-
-        let refIndex = buildCommitReferenceIndex(repo: repo)
-
-        switch scope {
-        case .head:
-            let pushResult = git_revwalk_push_head(walker)
-            if pushResult != 0 {
-                return []
+            guard result == 0, let walker = revwalk else {
+                throw LibGit2Error.cannotCreateRevwalk
             }
-        case .allReferences:
-            let pushed = pushAllGraphReferences(repo: repo, walker: walker)
-            if pushed == 0 {
+
+            git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue | GIT_SORT_TIME.rawValue)
+
+            let refIndex = buildCommitReferenceIndex(repo: repo)
+
+            switch scope {
+            case .head:
                 let pushResult = git_revwalk_push_head(walker)
                 if pushResult != 0 {
                     return []
                 }
-            }
-        }
-
-        var commits: [GitCommit] = []
-        var oid = git_oid()
-        var count = 0
-        var skipped = 0
-
-        // 跳过指定数量的提交
-        while skipped < skip && git_revwalk_next(&oid, walker) == 0 {
-            skipped += 1
-        }
-
-        // 遍历提交
-        while git_revwalk_next(&oid, walker) == 0 && count < limit {
-            var commit: OpaquePointer? = nil
-            defer { if commit != nil { git_commit_free(commit) } }
-
-            let lookupResult = git_commit_lookup(&commit, repo, &oid)
-
-            if lookupResult == 0, let commitPtr = commit {
-                if let gitCommit = parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex) {
-                    commits.append(gitCommit)
-                    count += 1
+            case .allReferences:
+                let pushed = pushAllGraphReferences(repo: repo, walker: walker)
+                if pushed == 0 {
+                    let pushResult = git_revwalk_push_head(walker)
+                    if pushResult != 0 {
+                        return []
+                    }
                 }
             }
-        }
 
-        return commits
+            var commits: [GitCommit] = []
+            var oid = git_oid()
+            var count = 0
+            var skipped = 0
+
+            // 跳过指定数量的提交
+            while skipped < skip && git_revwalk_next(&oid, walker) == 0 {
+                skipped += 1
+            }
+
+            // 遍历提交
+            while git_revwalk_next(&oid, walker) == 0 && count < limit {
+                var commit: OpaquePointer? = nil
+                defer { if commit != nil { git_commit_free(commit) } }
+
+                let lookupResult = git_commit_lookup(&commit, repo, &oid)
+
+                if lookupResult == 0, let commitPtr = commit {
+                    if let gitCommit = parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex) {
+                        commits.append(gitCommit)
+                        count += 1
+                    }
+                }
+            }
+
+            return commits
+        }
     }
 
     /// 分页获取提交列表
@@ -117,7 +125,9 @@ extension LibGit2 {
     ///   - size: 每页大小
     /// - Returns: 提交列表
     public static func getCommitListWithPagination(at path: String, page: Int, size: Int) throws -> [GitCommit] {
-        return try getCommitList(at: path, limit: size, skip: page * size)
+        return try LibGit2.serialized {
+            return try getCommitList(at: path, limit: size, skip: page * size)
+        }
     }
 
     /// 获取指定分支的提交列表
@@ -127,48 +137,50 @@ extension LibGit2 {
     ///   - limit: 最大返回数量
     /// - Returns: 提交列表
     public static func getCommitList(on branch: String, at path: String, limit: Int = Int.max) throws -> [GitCommit] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var revwalk: OpaquePointer? = nil
-        defer { if revwalk != nil { git_revwalk_free(revwalk) } }
+            var revwalk: OpaquePointer? = nil
+            defer { if revwalk != nil { git_revwalk_free(revwalk) } }
 
-        let result = git_revwalk_new(&revwalk, repo)
+            let result = git_revwalk_new(&revwalk, repo)
 
-        guard result == 0, let walker = revwalk else {
-            throw LibGit2Error.cannotCreateRevwalk
-        }
+            guard result == 0, let walker = revwalk else {
+                throw LibGit2Error.cannotCreateRevwalk
+            }
 
-        git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue | GIT_SORT_TIME.rawValue)
-        let refIndex = buildCommitReferenceIndex(repo: repo)
+            git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue | GIT_SORT_TIME.rawValue)
+            let refIndex = buildCommitReferenceIndex(repo: repo)
 
-        // 推送分支引用
-        let branchRef = "refs/heads/\(branch)"
-        var oid = git_oid()
+            // 推送分支引用
+            let branchRef = "refs/heads/\(branch)"
+            var oid = git_oid()
 
-        if git_reference_name_to_id(&oid, repo, branchRef) != 0 {
-            throw LibGit2Error.invalidReference
-        }
+            if git_reference_name_to_id(&oid, repo, branchRef) != 0 {
+                throw LibGit2Error.invalidReference
+            }
 
-        git_revwalk_push(walker, &oid)
+            git_revwalk_push(walker, &oid)
 
-        var commits: [GitCommit] = []
-        var commitOid = git_oid()
-        var count = 0
+            var commits: [GitCommit] = []
+            var commitOid = git_oid()
+            var count = 0
 
-        while git_revwalk_next(&commitOid, walker) == 0 && count < limit {
-            var commit: OpaquePointer? = nil
-            defer { if commit != nil { git_commit_free(commit) } }
+            while git_revwalk_next(&commitOid, walker) == 0 && count < limit {
+                var commit: OpaquePointer? = nil
+                defer { if commit != nil { git_commit_free(commit) } }
 
-            if git_commit_lookup(&commit, repo, &commitOid) == 0, let commitPtr = commit {
-                if let gitCommit = parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex) {
-                    commits.append(gitCommit)
-                    count += 1
+                if git_commit_lookup(&commit, repo, &commitOid) == 0, let commitPtr = commit {
+                    if let gitCommit = parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex) {
+                        commits.append(gitCommit)
+                        count += 1
+                    }
                 }
             }
-        }
 
-        return commits
+            return commits
+        }
     }
 
     /// 获取未推送的提交列表
@@ -240,25 +252,27 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 提交详细信息
     public static func getCommitDetail(commitHash: String, at path: String) throws -> GitCommit? {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var oid = git_oid()
-        let result = git_oid_fromstr(&oid, commitHash)
+            var oid = git_oid()
+            let result = git_oid_fromstr(&oid, commitHash)
 
-        if result != 0 {
-            throw LibGit2Error.invalidValue
+            if result != 0 {
+                throw LibGit2Error.invalidValue
+            }
+
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
+
+            if git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit {
+                let refIndex = buildCommitReferenceIndex(repo: repo)
+                return parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex)
+            }
+
+            return nil
         }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        if git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit {
-            let refIndex = buildCommitReferenceIndex(repo: repo)
-            return parseCommit(commitPtr, repo: repo, refsByCommitHash: refIndex)
-        }
-
-        return nil
     }
 
     // MARK: - 私有辅助方法

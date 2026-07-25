@@ -8,29 +8,31 @@ extension LibGit2 {
     /// 将 unified diff patch 应用到 index，等价于 `git apply --cached`。
     /// `mode == .unstage` 时会先反转 patch，再应用到 index。
     public static func applyPatch(_ patch: String, mode: GitPatchApplyMode, at path: String) throws {
-        let normalizedPatch = patch.hasSuffix("\n") ? patch : patch + "\n"
-        let patchToApply = mode == .stage ? normalizedPatch : reverseUnifiedDiff(normalizedPatch)
+        try LibGit2.serialized {
+            let normalizedPatch = patch.hasSuffix("\n") ? patch : patch + "\n"
+            let patchToApply = mode == .stage ? normalizedPatch : reverseUnifiedDiff(normalizedPatch)
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var diff: OpaquePointer?
-        defer { if diff != nil { git_diff_free(diff) } }
+            var diff: OpaquePointer?
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        let parseResult = patchToApply.withCString { buffer in
-            git_diff_from_buffer(&diff, buffer, strlen(buffer))
-        }
-        guard parseResult == 0, let diff else {
-            try applyTextPatchToIndex(patchToApply, repo: repo)
-            return
-        }
+            let parseResult = patchToApply.withCString { buffer in
+                git_diff_from_buffer(&diff, buffer, strlen(buffer))
+            }
+            guard parseResult == 0, let diff else {
+                try applyTextPatchToIndex(patchToApply, repo: repo)
+                return
+            }
 
-        var applyOptions = git_apply_options()
-        git_apply_options_init(&applyOptions, UInt32(GIT_APPLY_OPTIONS_VERSION))
+            var applyOptions = git_apply_options()
+            git_apply_options_init(&applyOptions, UInt32(GIT_APPLY_OPTIONS_VERSION))
 
-        let result = git_apply(repo, diff, GIT_APPLY_LOCATION_INDEX, &applyOptions)
-        if result != 0 {
-            try applyTextPatchToIndex(patchToApply, repo: repo)
+            let result = git_apply(repo, diff, GIT_APPLY_LOCATION_INDEX, &applyOptions)
+            if result != 0 {
+                try applyTextPatchToIndex(patchToApply, repo: repo)
+            }
         }
     }
 
@@ -40,70 +42,72 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更（false = 工作区变更）
     /// - Returns: 差异文件列表
     public static func getDiffFileList(at path: String, staged: Bool = false) throws -> [GitDiffFile] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var diff: OpaquePointer? = nil
-        defer { if diff != nil { git_diff_free(diff) } }
+            var diff: OpaquePointer? = nil
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        if staged {
-            // 获取已暂存的变更 (index vs HEAD)
-            var index: OpaquePointer? = nil
-            defer { if index != nil { git_index_free(index) } }
+            if staged {
+                // 获取已暂存的变更 (index vs HEAD)
+                var index: OpaquePointer? = nil
+                defer { if index != nil { git_index_free(index) } }
 
-            guard git_repository_index(&index, repo) == 0 else {
-                throw LibGit2Error.cannotGetIndex
-            }
-
-            var tree: OpaquePointer? = nil
-            defer { if tree != nil { git_tree_free(tree) } }
-
-            // 获取 HEAD tree
-            var headCommit: OpaquePointer? = nil
-            defer { if headCommit != nil { git_commit_free(headCommit) } }
-
-            var headOID = git_oid()
-
-            // 检查是否有 HEAD（可能是空仓库）
-            if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-                git_commit_lookup(&headCommit, repo, &headOID)
-
-                if let commit = headCommit {
-                    git_commit_tree(&tree, commit)
+                guard git_repository_index(&index, repo) == 0 else {
+                    throw LibGit2Error.cannotGetIndex
                 }
-            }
 
-            // 如果没有 HEAD，创建空 diff
-            if tree == nil {
+                var tree: OpaquePointer? = nil
+                defer { if tree != nil { git_tree_free(tree) } }
+
+                // 获取 HEAD tree
+                var headCommit: OpaquePointer? = nil
+                defer { if headCommit != nil { git_commit_free(headCommit) } }
+
+                var headOID = git_oid()
+
+                // 检查是否有 HEAD（可能是空仓库）
+                if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+                    git_commit_lookup(&headCommit, repo, &headOID)
+
+                    if let commit = headCommit {
+                        git_commit_tree(&tree, commit)
+                    }
+                }
+
+                // 如果没有 HEAD，创建空 diff
+                if tree == nil {
+                    var diffOpts = git_diff_options()
+                    git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+                    git_diff_tree_to_tree(&diff, repo, nil, nil, &diffOpts)
+                } else {
+                    git_diff_tree_to_index(&diff, repo, tree, index, nil)
+                }
+            } else {
+                // 获取工作区变更 (index vs workdir)
+                var index: OpaquePointer? = nil
+                defer { if index != nil { git_index_free(index) } }
+
+                guard git_repository_index(&index, repo) == 0 else {
+                    throw LibGit2Error.cannotGetIndex
+                }
+
+                // 配置 diff 选项以包含未跟踪的文件
                 var diffOpts = git_diff_options()
                 git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-                git_diff_tree_to_tree(&diff, repo, nil, nil, &diffOpts)
-            } else {
-                git_diff_tree_to_index(&diff, repo, tree, index, nil)
-            }
-        } else {
-            // 获取工作区变更 (index vs workdir)
-            var index: OpaquePointer? = nil
-            defer { if index != nil { git_index_free(index) } }
+                diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
+                                GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
 
-            guard git_repository_index(&index, repo) == 0 else {
-                throw LibGit2Error.cannotGetIndex
+                git_diff_index_to_workdir(&diff, repo, index, &diffOpts)
             }
 
-            // 配置 diff 选项以包含未跟踪的文件
-            var diffOpts = git_diff_options()
-            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-            diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
-                            GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+            guard let diffPtr = diff else {
+                return []
+            }
 
-            git_diff_index_to_workdir(&diff, repo, index, &diffOpts)
+            return parseDiffFiles(diffPtr, repo: repo, path: path)
         }
-
-        guard let diffPtr = diff else {
-            return []
-        }
-
-        return parseDiffFiles(diffPtr, repo: repo, path: path)
     }
 
     /// 获取指定文件的差异内容
@@ -113,127 +117,129 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更
     /// - Returns: 差异内容字符串
     public static func getFileDiff(for file: String, at path: String, staged: Bool = false, ignoreWhitespace: Bool = false) throws -> String {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var diff: OpaquePointer? = nil
-        defer { if diff != nil { git_diff_free(diff) } }
+            var diff: OpaquePointer? = nil
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        if staged {
-            var index: OpaquePointer? = nil
-            defer { if index != nil { git_index_free(index) } }
+            if staged {
+                var index: OpaquePointer? = nil
+                defer { if index != nil { git_index_free(index) } }
 
-            guard git_repository_index(&index, repo) == 0 else {
-                throw LibGit2Error.cannotGetIndex
-            }
-
-            var tree: OpaquePointer? = nil
-            defer { if tree != nil { git_tree_free(tree) } }
-
-            var headCommit: OpaquePointer? = nil
-            defer { if headCommit != nil { git_commit_free(headCommit) } }
-
-            var headOID = git_oid()
-
-            if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-                git_commit_lookup(&headCommit, repo, &headOID)
-
-                if let commit = headCommit {
-                    git_commit_tree(&tree, commit)
+                guard git_repository_index(&index, repo) == 0 else {
+                    throw LibGit2Error.cannotGetIndex
                 }
-            }
 
-            if tree != nil {
+                var tree: OpaquePointer? = nil
+                defer { if tree != nil { git_tree_free(tree) } }
+
+                var headCommit: OpaquePointer? = nil
+                defer { if headCommit != nil { git_commit_free(headCommit) } }
+
+                var headOID = git_oid()
+
+                if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+                    git_commit_lookup(&headCommit, repo, &headOID)
+
+                    if let commit = headCommit {
+                        git_commit_tree(&tree, commit)
+                    }
+                }
+
+                if tree != nil {
+                    var diffOpts = git_diff_options()
+                    git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+                    if ignoreWhitespace {
+                        diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
+                    }
+                    let filePathCStr = strdup(file)
+                    var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
+                    strings.withUnsafeMutableBufferPointer { buffer in
+                        diffOpts.pathspec.strings = buffer.baseAddress
+                        diffOpts.pathspec.count = 1
+                    }
+
+                    defer {
+                        free(filePathCStr)
+                    }
+
+                    git_diff_tree_to_index(&diff, repo, tree, index, &diffOpts)
+                }
+            } else {
+                var index: OpaquePointer? = nil
+                defer { if index != nil { git_index_free(index) } }
+
+                guard git_repository_index(&index, repo) == 0 else {
+                    throw LibGit2Error.cannotGetIndex
+                }
+
                 var diffOpts = git_diff_options()
                 git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-                if ignoreWhitespace {
-                    diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
-                }
                 let filePathCStr = strdup(file)
                 var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
                 strings.withUnsafeMutableBufferPointer { buffer in
                     diffOpts.pathspec.strings = buffer.baseAddress
                     diffOpts.pathspec.count = 1
                 }
-                
+                diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
+                                GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+                if ignoreWhitespace {
+                    diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
+                }
+
                 defer {
                     free(filePathCStr)
                 }
 
-                git_diff_tree_to_index(&diff, repo, tree, index, &diffOpts)
-            }
-        } else {
-            var index: OpaquePointer? = nil
-            defer { if index != nil { git_index_free(index) } }
-
-            guard git_repository_index(&index, repo) == 0 else {
-                throw LibGit2Error.cannotGetIndex
+                git_diff_index_to_workdir(&diff, repo, index, &diffOpts)
             }
 
-            var diffOpts = git_diff_options()
-            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-            let filePathCStr = strdup(file)
-            var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
-            strings.withUnsafeMutableBufferPointer { buffer in
-                diffOpts.pathspec.strings = buffer.baseAddress
-                diffOpts.pathspec.count = 1
-            }
-            diffOpts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue |
-                            GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
-            if ignoreWhitespace {
-                diffOpts.flags |= GIT_DIFF_IGNORE_WHITESPACE.rawValue
+            guard let diffPtr = diff else {
+                return ""
             }
 
-            defer {
-                free(filePathCStr)
-            }
+            // 生成 patch
+            var patch: OpaquePointer? = nil
+            defer { if patch != nil { git_patch_free(patch) } }
 
-            git_diff_index_to_workdir(&diff, repo, index, &diffOpts)
-        }
+            let count = git_diff_num_deltas(diffPtr)
+            var patchText = ""
 
-        guard let diffPtr = diff else {
-            return ""
-        }
+            for i in 0..<count {
+                // 🔧 修复：检查 delta 状态，对于未跟踪/新增文件需要特殊处理
+                var deltaType: git_delta_t = GIT_DELTA_UNMODIFIED
+                if let delta = git_diff_get_delta(diffPtr, i) {
+                    deltaType = delta.pointee.status
+                }
 
-        // 生成 patch
-        var patch: OpaquePointer? = nil
-        defer { if patch != nil { git_patch_free(patch) } }
+                if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
+                    var buf = git_buf()
+                    defer { git_buf_dispose(&buf) }
 
-        let count = git_diff_num_deltas(diffPtr)
-        var patchText = ""
+                    if git_patch_to_buf(&buf, patchPtr) == 0 {
+                        let content = String(cString: buf.ptr)
+                        patchText += content
+                    }
+                }
 
-        for i in 0..<count {
-            // 🔧 修复：检查 delta 状态，对于未跟踪/新增文件需要特殊处理
-            var deltaType: git_delta_t = GIT_DELTA_UNMODIFIED
-            if let delta = git_diff_get_delta(diffPtr, i) {
-                deltaType = delta.pointee.status
-            }
-
-            if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
-                var buf = git_buf()
-                defer { git_buf_dispose(&buf) }
-
-                if git_patch_to_buf(&buf, patchPtr) == 0 {
-                    let content = String(cString: buf.ptr)
-                    patchText += content
+                //  修复：对于未跟踪的新增文件或 diff 为空的 ADDED 文件，手动生成完整的 diff 内容
+                // Libgit2 不会为 GIT_DELTA_UNTRACKED 生成 patch，需要手动构建
+                if patchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let isNewOrUntracked = (deltaType == GIT_DELTA_UNTRACKED || deltaType == GIT_DELTA_ADDED)
+                    if isNewOrUntracked {
+                        patchText = generateAddedFileDiff(for: file, at: path)
+                    }
                 }
             }
 
-            //  修复：对于未跟踪的新增文件或 diff 为空的 ADDED 文件，手动生成完整的 diff 内容
-            // Libgit2 不会为 GIT_DELTA_UNTRACKED 生成 patch，需要手动构建
-            if patchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let isNewOrUntracked = (deltaType == GIT_DELTA_UNTRACKED || deltaType == GIT_DELTA_ADDED)
-                if isNewOrUntracked {
-                    patchText = generateAddedFileDiff(for: file, at: path)
-                }
+            if patchText.isEmpty, staged == false {
+                return try makeSyntheticWorkdirDiff(for: file, at: path)
             }
-        }
 
-        if patchText.isEmpty, staged == false {
-            return try makeSyntheticWorkdirDiff(for: file, at: path)
+            return patchText
         }
-
-        return patchText
     }
 
     /// 获取指定提交修改的文件列表
@@ -242,68 +248,70 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 差异文件列表
     public static func getCommitDiffFiles(atCommit commitHash: String, at path: String) throws -> [GitDiffFile] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        // 获取指定commit
-        var oid = git_oid()
-        guard git_oid_fromstr(&oid, commitHash) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
-
-        // 获取该commit的tree
-        var commitTree: OpaquePointer? = nil
-        defer { if commitTree != nil { git_tree_free(commitTree) } }
-
-        guard git_commit_tree(&commitTree, commitPtr) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
-
-        // 获取父commit（用于比较）
-        let parentCount = git_commit_parentcount(commitPtr)
-        var diff: OpaquePointer? = nil
-        defer { if diff != nil { git_diff_free(diff) } }
-
-        if parentCount == 0 {
-            // 初始提交，与空树比较
-            var diffOpts = git_diff_options()
-            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-            git_diff_tree_to_tree(&diff, repo, nil, commitTree, &diffOpts)
-        } else {
-            // 获取第一个父commit
-            var parentOid = git_commit_parent_id(commitPtr, 0).pointee
-
-            var parentCommit: OpaquePointer? = nil
-            defer { if parentCommit != nil { git_commit_free(parentCommit) } }
-
-            guard git_commit_lookup(&parentCommit, repo, &parentOid) == 0,
-                  let parentCommitPtr = parentCommit else {
+            // 获取指定commit
+            var oid = git_oid()
+            guard git_oid_fromstr(&oid, commitHash) == 0 else {
                 throw LibGit2Error.invalidValue
             }
 
-            var parentTree: OpaquePointer? = nil
-            defer { if parentTree != nil { git_tree_free(parentTree) } }
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
 
-            guard git_commit_tree(&parentTree, parentCommitPtr) == 0 else {
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
                 throw LibGit2Error.invalidValue
             }
 
-            // 比较父commit和当前commit的tree
-            git_diff_tree_to_tree(&diff, repo, parentTree, commitTree, nil)
-        }
+            // 获取该commit的tree
+            var commitTree: OpaquePointer? = nil
+            defer { if commitTree != nil { git_tree_free(commitTree) } }
 
-        guard let diffPtr = diff else {
-            return []
-        }
+            guard git_commit_tree(&commitTree, commitPtr) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
 
-        return parseDiffFiles(diffPtr, repo: repo, path: path)
+            // 获取父commit（用于比较）
+            let parentCount = git_commit_parentcount(commitPtr)
+            var diff: OpaquePointer? = nil
+            defer { if diff != nil { git_diff_free(diff) } }
+
+            if parentCount == 0 {
+                // 初始提交，与空树比较
+                var diffOpts = git_diff_options()
+                git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+                git_diff_tree_to_tree(&diff, repo, nil, commitTree, &diffOpts)
+            } else {
+                // 获取第一个父commit
+                var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+
+                var parentCommit: OpaquePointer? = nil
+                defer { if parentCommit != nil { git_commit_free(parentCommit) } }
+
+                guard git_commit_lookup(&parentCommit, repo, &parentOid) == 0,
+                      let parentCommitPtr = parentCommit else {
+                    throw LibGit2Error.invalidValue
+                }
+
+                var parentTree: OpaquePointer? = nil
+                defer { if parentTree != nil { git_tree_free(parentTree) } }
+
+                guard git_commit_tree(&parentTree, parentCommitPtr) == 0 else {
+                    throw LibGit2Error.invalidValue
+                }
+
+                // 比较父commit和当前commit的tree
+                git_diff_tree_to_tree(&diff, repo, parentTree, commitTree, nil)
+            }
+
+            guard let diffPtr = diff else {
+                return []
+            }
+
+            return parseDiffFiles(diffPtr, repo: repo, path: path)
+        }
     }
 
     /// 获取两个提交之间的差异
@@ -313,71 +321,73 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 差异内容字符串
     public static func getDiffBetweenCommits(from: String, to: String, at path: String) throws -> String {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var fromOid = git_oid()
-        var toOid = git_oid()
+            var fromOid = git_oid()
+            var toOid = git_oid()
 
-        guard git_oid_fromstr(&fromOid, from) == 0,
-              git_oid_fromstr(&toOid, to) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
+            guard git_oid_fromstr(&fromOid, from) == 0,
+                  git_oid_fromstr(&toOid, to) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
 
-        var fromCommit: OpaquePointer? = nil
-        var toCommit: OpaquePointer? = nil
-        defer {
-            if fromCommit != nil { git_commit_free(fromCommit) }
-            if toCommit != nil { git_commit_free(toCommit) }
-        }
+            var fromCommit: OpaquePointer? = nil
+            var toCommit: OpaquePointer? = nil
+            defer {
+                if fromCommit != nil { git_commit_free(fromCommit) }
+                if toCommit != nil { git_commit_free(toCommit) }
+            }
 
-        guard git_commit_lookup(&fromCommit, repo, &fromOid) == 0,
-              git_commit_lookup(&toCommit, repo, &toOid) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
+            guard git_commit_lookup(&fromCommit, repo, &fromOid) == 0,
+                  git_commit_lookup(&toCommit, repo, &toOid) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
 
-        var fromTree: OpaquePointer? = nil
-        var toTree: OpaquePointer? = nil
-        defer {
-            if fromTree != nil { git_tree_free(fromTree) }
-            if toTree != nil { git_tree_free(toTree) }
-        }
+            var fromTree: OpaquePointer? = nil
+            var toTree: OpaquePointer? = nil
+            defer {
+                if fromTree != nil { git_tree_free(fromTree) }
+                if toTree != nil { git_tree_free(toTree) }
+            }
 
-        guard let fromCommit, let toCommit,
-              git_commit_tree(&fromTree, fromCommit) == 0,
-              git_commit_tree(&toTree, toCommit) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
+            guard let fromCommit, let toCommit,
+                  git_commit_tree(&fromTree, fromCommit) == 0,
+                  git_commit_tree(&toTree, toCommit) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
 
-        var diff: OpaquePointer? = nil
-        defer { if diff != nil { git_diff_free(diff) } }
+            var diff: OpaquePointer? = nil
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        git_diff_tree_to_tree(&diff, repo, fromTree, toTree, nil)
+            git_diff_tree_to_tree(&diff, repo, fromTree, toTree, nil)
 
-        guard let diffPtr = diff else {
-            return ""
-        }
+            guard let diffPtr = diff else {
+                return ""
+            }
 
-        // 生成 patch
-        var patch: OpaquePointer? = nil
-        defer { if patch != nil { git_patch_free(patch) } }
+            // 生成 patch
+            var patch: OpaquePointer? = nil
+            defer { if patch != nil { git_patch_free(patch) } }
 
-        let count = git_diff_num_deltas(diffPtr)
-        var patchText = ""
+            let count = git_diff_num_deltas(diffPtr)
+            var patchText = ""
 
-        for i in 0..<count {
-            if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
-                var buf = git_buf()
-                defer { git_buf_dispose(&buf) }
+            for i in 0..<count {
+                if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
+                    var buf = git_buf()
+                    defer { git_buf_dispose(&buf) }
 
-                if git_patch_to_buf(&buf, patchPtr) == 0 {
-                    let content = String(cString: buf.ptr)
-                    patchText += content
+                    if git_patch_to_buf(&buf, patchPtr) == 0 {
+                        let content = String(cString: buf.ptr)
+                        patchText += content
+                    }
                 }
             }
-        }
 
-        return patchText
+            return patchText
+        }
     }
 
     /// 获取指定提交中的文件内容
@@ -387,11 +397,13 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件内容字符串
     public static func getFileContent(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> String {
-        let data = try getFileData(atCommit: commitHash, file: filePath, at: repoPath)
-        guard let content = String(data: data, encoding: .utf8) else {
-            throw LibGit2Error.invalidValue
+        return try LibGit2.serialized {
+            let data = try getFileData(atCommit: commitHash, file: filePath, at: repoPath)
+            guard let content = String(data: data, encoding: .utf8) else {
+                throw LibGit2Error.invalidValue
+            }
+            return content
         }
-        return content
     }
 
     /// 获取指定提交中文件的原始二进制数据
@@ -402,49 +414,51 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件的原始二进制数据
     public static func getFileData(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> Data {
-        let repo = try openRepository(at: repoPath)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: repoPath)
+            defer { git_repository_free(repo) }
 
-        var oid = git_oid()
-        guard git_oid_fromstr(&oid, commitHash) == 0 else {
-            throw LibGit2Error.invalidValue
+            var oid = git_oid()
+            guard git_oid_fromstr(&oid, commitHash) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
+
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var tree: OpaquePointer? = nil
+            defer { if tree != nil { git_tree_free(tree) } }
+
+            guard git_commit_tree(&tree, commitPtr) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var treeEntry: OpaquePointer? = nil
+            guard git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry else {
+                throw LibGit2Error.invalidValue
+            }
+            defer { git_tree_entry_free(entry) }
+
+            var blob: OpaquePointer? = nil
+            let entryOid = git_tree_entry_id(entry)
+            guard git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob else {
+                throw LibGit2Error.invalidValue
+            }
+            defer { git_blob_free(blobPtr) }
+
+            let contentPtr = git_blob_rawcontent(blobPtr)
+            let size = git_blob_rawsize(blobPtr)
+
+            guard let ptr = contentPtr else {
+                throw LibGit2Error.invalidValue
+            }
+
+            return Data(bytes: ptr, count: Int(size))
         }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
-
-        var tree: OpaquePointer? = nil
-        defer { if tree != nil { git_tree_free(tree) } }
-
-        guard git_commit_tree(&tree, commitPtr) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
-
-        var treeEntry: OpaquePointer? = nil
-        guard git_tree_entry_bypath(&treeEntry, tree, filePath) == 0, let entry = treeEntry else {
-            throw LibGit2Error.invalidValue
-        }
-        defer { git_tree_entry_free(entry) }
-
-        var blob: OpaquePointer? = nil
-        let entryOid = git_tree_entry_id(entry)
-        guard git_blob_lookup(&blob, repo, entryOid) == 0, let blobPtr = blob else {
-            throw LibGit2Error.invalidValue
-        }
-        defer { git_blob_free(blobPtr) }
-
-        let contentPtr = git_blob_rawcontent(blobPtr)
-        let size = git_blob_rawsize(blobPtr)
-
-        guard let ptr = contentPtr else {
-            throw LibGit2Error.invalidValue
-        }
-
-        return Data(bytes: ptr, count: Int(size))
     }
 
     /// 获取指定提交中文件变更的前后内容
@@ -454,60 +468,62 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 元组 (before: 修改前的内容, after: 修改后的内容)
     public static func getFileContentChange(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
-        let repo = try openRepository(at: repoPath)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: repoPath)
+            defer { git_repository_free(repo) }
 
-        // 获取指定commit
-        var oid = git_oid()
-        guard git_oid_fromstr(&oid, commitHash) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
-
-        // 获取该commit的父commit（用于获取修改前的内容）
-        let parentCount = git_commit_parentcount(commitPtr)
-        var beforeContent: String? = nil
-        var afterContent: String? = nil
-
-        if parentCount > 0 {
-            // 有父commit，从父commit获取文件内容
-            var parentOid = git_commit_parent_id(commitPtr, 0).pointee
-
-            var parentCommit: OpaquePointer? = nil
-            defer { if parentCommit != nil { git_commit_free(parentCommit) } }
-
-            if git_commit_lookup(&parentCommit, repo, &parentOid) == 0 {
-                guard let hashPtr = git_oid_tostr_s(&parentOid) else {
-                    return (nil, nil)
-                }
-                do {
-                    let parentCommitHash = String(cString: hashPtr)
-                    beforeContent = try getFileContent(atCommit: parentCommitHash, file: filePath, at: repoPath)
-                } catch {
-                    // 文件可能在父commit中不存在，这是正常情况
-                    beforeContent = nil
-                }
+            // 获取指定commit
+            var oid = git_oid()
+            guard git_oid_fromstr(&oid, commitHash) == 0 else {
+                throw LibGit2Error.invalidValue
             }
-        } else {
-            // 初始提交，没有修改前内容
-            beforeContent = nil
-        }
 
-        // 从当前commit获取文件内容（修改后的内容）
-        do {
-            afterContent = try getFileContent(atCommit: commitHash, file: filePath, at: repoPath)
-        } catch {
-            // 文件被删除，这是正常情况
-            afterContent = nil
-        }
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
 
-        return (beforeContent, afterContent)
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
+                throw LibGit2Error.invalidValue
+            }
+
+            // 获取该commit的父commit（用于获取修改前的内容）
+            let parentCount = git_commit_parentcount(commitPtr)
+            var beforeContent: String? = nil
+            var afterContent: String? = nil
+
+            if parentCount > 0 {
+                // 有父commit，从父commit获取文件内容
+                var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+
+                var parentCommit: OpaquePointer? = nil
+                defer { if parentCommit != nil { git_commit_free(parentCommit) } }
+
+                if git_commit_lookup(&parentCommit, repo, &parentOid) == 0 {
+                    guard let hashPtr = git_oid_tostr_s(&parentOid) else {
+                        return (nil, nil)
+                    }
+                    do {
+                        let parentCommitHash = String(cString: hashPtr)
+                        beforeContent = try getFileContent(atCommit: parentCommitHash, file: filePath, at: repoPath)
+                    } catch {
+                        // 文件可能在父commit中不存在，这是正常情况
+                        beforeContent = nil
+                    }
+                }
+            } else {
+                // 初始提交，没有修改前内容
+                beforeContent = nil
+            }
+
+            // 从当前commit获取文件内容（修改后的内容）
+            do {
+                afterContent = try getFileContent(atCommit: commitHash, file: filePath, at: repoPath)
+            } catch {
+                // 文件被删除，这是正常情况
+                afterContent = nil
+            }
+
+            return (beforeContent, afterContent)
+        }
     }
 
     /// 获取未提交文件的前后内容
@@ -516,41 +532,43 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 元组 (before: HEAD中的内容, after: 工作区中的内容)
     public static func getUncommittedFileContentChange(for filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
-        let repo = try openRepository(at: repoPath)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: repoPath)
+            defer { git_repository_free(repo) }
 
-        // 获取HEAD commit（用于获取修改前的内容）
-        var beforeContent: String? = nil
+            // 获取HEAD commit（用于获取修改前的内容）
+            var beforeContent: String? = nil
 
-        var headOID = git_oid()
-        if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-            if let hashPtr = git_oid_tostr_s(&headOID) {
-                let headCommitHash = String(cString: hashPtr)
-                do {
-                    beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
-                } catch {
-                    // 文件在HEAD中不存在（新文件），这是正常情况
-                    beforeContent = nil
+            var headOID = git_oid()
+            if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+                if let hashPtr = git_oid_tostr_s(&headOID) {
+                    let headCommitHash = String(cString: hashPtr)
+                    do {
+                        beforeContent = try getFileContent(atCommit: headCommitHash, file: filePath, at: repoPath)
+                    } catch {
+                        // 文件在HEAD中不存在（新文件），这是正常情况
+                        beforeContent = nil
+                    }
                 }
             }
-        }
 
-        // 从工作区获取文件内容（修改后的内容）
-        var afterContent: String? = nil
-        let fullPath = URL(fileURLWithPath: repoPath).appendingPathComponent(filePath).path
+            // 从工作区获取文件内容（修改后的内容）
+            var afterContent: String? = nil
+            let fullPath = URL(fileURLWithPath: repoPath).appendingPathComponent(filePath).path
 
-        if FileManager.default.fileExists(atPath: fullPath) {
-            do {
-                afterContent = try String(contentsOfFile: fullPath, encoding: .utf8)
-            } catch {
+            if FileManager.default.fileExists(atPath: fullPath) {
+                do {
+                    afterContent = try String(contentsOfFile: fullPath, encoding: .utf8)
+                } catch {
+                    afterContent = nil
+                }
+            } else {
+                // 文件被删除
                 afterContent = nil
             }
-        } else {
-            // 文件被删除
-            afterContent = nil
-        }
 
-        return (beforeContent, afterContent)
+            return (beforeContent, afterContent)
+        }
     }
 
     /// 获取指定提交中特定文件的差异字符串
@@ -560,111 +578,113 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: git diff 格式的字符串
     public static func getFileDiff(atCommit commitHash: String, for filePath: String, at repoPath: String) throws -> String {
-        let repo = try openRepository(at: repoPath)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: repoPath)
+            defer { git_repository_free(repo) }
 
-        // 获取指定 commit
-        var oid = git_oid()
-        guard git_oid_fromstr(&oid, commitHash) == 0 else {
-            throw LibGit2Error.invalidValue
-        }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
-
-        // 获取父 commit（用于比较）
-        let parentCount = git_commit_parentcount(commitPtr)
-        var diff: OpaquePointer? = nil
-        defer { if diff != nil { git_diff_free(diff) } }
-
-        if parentCount == 0 {
-            // 初始提交，与空树比较
-            var diffOpts = git_diff_options()
-            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-
-            // 设置 pathspec 只包含目标文件
-            let filePathCStr = strdup(filePath)
-            var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
-            strings.withUnsafeMutableBufferPointer { buffer in
-                diffOpts.pathspec.strings = buffer.baseAddress
-                diffOpts.pathspec.count = 1
-            }
-            defer { free(filePathCStr) }
-
-            var commitTree: OpaquePointer? = nil
-            defer { if commitTree != nil { git_tree_free(commitTree) } }
-            guard git_commit_tree(&commitTree, commitPtr) == 0 else {
+            // 获取指定 commit
+            var oid = git_oid()
+            guard git_oid_fromstr(&oid, commitHash) == 0 else {
                 throw LibGit2Error.invalidValue
             }
 
-            git_diff_tree_to_tree(&diff, repo, nil, commitTree, &diffOpts)
-        } else {
-            // 获取第一个父 commit
-            var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
 
-            var parentCommit: OpaquePointer? = nil
-            defer { if parentCommit != nil { git_commit_free(parentCommit) } }
-
-            guard git_commit_lookup(&parentCommit, repo, &parentOid) == 0,
-                  let parentCommitPtr = parentCommit else {
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commitPtr = commit else {
                 throw LibGit2Error.invalidValue
             }
 
-            var parentTree: OpaquePointer? = nil
-            var commitTree: OpaquePointer? = nil
-            defer {
-                if parentTree != nil { git_tree_free(parentTree) }
-                if commitTree != nil { git_tree_free(commitTree) }
+            // 获取父 commit（用于比较）
+            let parentCount = git_commit_parentcount(commitPtr)
+            var diff: OpaquePointer? = nil
+            defer { if diff != nil { git_diff_free(diff) } }
+
+            if parentCount == 0 {
+                // 初始提交，与空树比较
+                var diffOpts = git_diff_options()
+                git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+
+                // 设置 pathspec 只包含目标文件
+                let filePathCStr = strdup(filePath)
+                var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
+                strings.withUnsafeMutableBufferPointer { buffer in
+                    diffOpts.pathspec.strings = buffer.baseAddress
+                    diffOpts.pathspec.count = 1
+                }
+                defer { free(filePathCStr) }
+
+                var commitTree: OpaquePointer? = nil
+                defer { if commitTree != nil { git_tree_free(commitTree) } }
+                guard git_commit_tree(&commitTree, commitPtr) == 0 else {
+                    throw LibGit2Error.invalidValue
+                }
+
+                git_diff_tree_to_tree(&diff, repo, nil, commitTree, &diffOpts)
+            } else {
+                // 获取第一个父 commit
+                var parentOid = git_commit_parent_id(commitPtr, 0).pointee
+
+                var parentCommit: OpaquePointer? = nil
+                defer { if parentCommit != nil { git_commit_free(parentCommit) } }
+
+                guard git_commit_lookup(&parentCommit, repo, &parentOid) == 0,
+                      let parentCommitPtr = parentCommit else {
+                    throw LibGit2Error.invalidValue
+                }
+
+                var parentTree: OpaquePointer? = nil
+                var commitTree: OpaquePointer? = nil
+                defer {
+                    if parentTree != nil { git_tree_free(parentTree) }
+                    if commitTree != nil { git_tree_free(commitTree) }
+                }
+
+                guard git_commit_tree(&parentTree, parentCommitPtr) == 0,
+                      git_commit_tree(&commitTree, commitPtr) == 0 else {
+                    throw LibGit2Error.invalidValue
+                }
+
+                var diffOpts = git_diff_options()
+                git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+
+                // 设置 pathspec 只包含目标文件
+                let filePathCStr = strdup(filePath)
+                var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
+                strings.withUnsafeMutableBufferPointer { buffer in
+                    diffOpts.pathspec.strings = buffer.baseAddress
+                    diffOpts.pathspec.count = 1
+                }
+                defer { free(filePathCStr) }
+
+                git_diff_tree_to_tree(&diff, repo, parentTree, commitTree, &diffOpts)
             }
 
-            guard git_commit_tree(&parentTree, parentCommitPtr) == 0,
-                  git_commit_tree(&commitTree, commitPtr) == 0 else {
-                throw LibGit2Error.invalidValue
+            guard let diffPtr = diff else {
+                return ""
             }
 
-            var diffOpts = git_diff_options()
-            git_diff_init_options(&diffOpts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+            // 生成 patch
+            var patch: OpaquePointer? = nil
+            defer { if patch != nil { git_patch_free(patch) } }
 
-            // 设置 pathspec 只包含目标文件
-            let filePathCStr = strdup(filePath)
-            var strings: [UnsafeMutablePointer<CChar>?] = [filePathCStr]
-            strings.withUnsafeMutableBufferPointer { buffer in
-                diffOpts.pathspec.strings = buffer.baseAddress
-                diffOpts.pathspec.count = 1
-            }
-            defer { free(filePathCStr) }
+            let count = git_diff_num_deltas(diffPtr)
+            var patchText = ""
 
-            git_diff_tree_to_tree(&diff, repo, parentTree, commitTree, &diffOpts)
-        }
+            for i in 0..<count {
+                if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
+                    var buf = git_buf()
+                    defer { git_buf_dispose(&buf) }
 
-        guard let diffPtr = diff else {
-            return ""
-        }
-
-        // 生成 patch
-        var patch: OpaquePointer? = nil
-        defer { if patch != nil { git_patch_free(patch) } }
-
-        let count = git_diff_num_deltas(diffPtr)
-        var patchText = ""
-
-        for i in 0..<count {
-            if git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch {
-                var buf = git_buf()
-                defer { git_buf_dispose(&buf) }
-
-                if git_patch_to_buf(&buf, patchPtr) == 0 {
-                    let content = String(cString: buf.ptr)
-                    patchText += content
+                    if git_patch_to_buf(&buf, patchPtr) == 0 {
+                        let content = String(cString: buf.ptr)
+                        patchText += content
+                    }
                 }
             }
-        }
 
-        return patchText
+            return patchText
+        }
     }
 
     // MARK: - 私有辅助方法

@@ -9,88 +9,100 @@ public enum GitConflictFileVersion {
 
 extension LibGit2 {
     public static func conflictFileContent(path filePath: String, version: GitConflictFileVersion, at path: String) throws -> String {
-        let data = try conflictFileData(path: filePath, version: version, at: path)
-        return String(decoding: data, as: UTF8.self)
+        return try LibGit2.serialized {
+            let data = try conflictFileData(path: filePath, version: version, at: path)
+            return String(decoding: data, as: UTF8.self)
+        }
     }
 
     public static func checkoutConflictFileVersion(path filePath: String, version: GitConflictFileVersion, at path: String) throws {
-        let data = try conflictFileData(path: filePath, version: version, at: path)
-        let targetURL = URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent(filePath)
-        try FileManager.default.createDirectory(
-            at: targetURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try data.write(to: targetURL)
+        try LibGit2.serialized {
+            let data = try conflictFileData(path: filePath, version: version, at: path)
+            let targetURL = URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent(filePath)
+            try FileManager.default.createDirectory(
+                at: targetURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: targetURL)
+        }
     }
 
     public static func revertCommit(_ commitHash: String, at path: String, verbose: Bool = true) throws {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let commit = try lookupCommit(commitHash, in: repo)
-        defer { git_commit_free(commit) }
+            let commit = try lookupCommit(commitHash, in: repo)
+            defer { git_commit_free(commit) }
 
-        var options = git_revert_options()
-        git_revert_options_init(&options, UInt32(GIT_REVERT_OPTIONS_VERSION))
-        options.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+            var options = git_revert_options()
+            git_revert_options_init(&options, UInt32(GIT_REVERT_OPTIONS_VERSION))
+            options.checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
 
-        let result = git_revert(repo, commit, &options)
-        if result != 0 {
-            throw LibGit2Error.mergeConflict
+            let result = git_revert(repo, commit, &options)
+            if result != 0 {
+                throw LibGit2Error.mergeConflict
+            }
+
+            if try hasMergeConflicts(at: path) {
+                throw LibGit2Error.mergeConflict
+            }
+
+            let subject = commitSummary(commit)
+            _ = try createCommit(message: "Revert \"\(subject)\"", at: path, verbose: verbose)
+            git_repository_state_cleanup(repo)
         }
-
-        if try hasMergeConflicts(at: path) {
-            throw LibGit2Error.mergeConflict
-        }
-
-        let subject = commitSummary(commit)
-        _ = try createCommit(message: "Revert \"\(subject)\"", at: path, verbose: verbose)
-        git_repository_state_cleanup(repo)
     }
 
     public static func cherryPick(commits commitHashes: [String], at path: String, verbose: Bool = true) throws {
-        let trimmedHashes = commitHashes
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.isEmpty == false }
+        try LibGit2.serialized {
+            let trimmedHashes = commitHashes
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { $0.isEmpty == false }
 
-        guard trimmedHashes.isEmpty == false else {
-            throw LibGit2Error.invalidReference
-        }
+            guard trimmedHashes.isEmpty == false else {
+                throw LibGit2Error.invalidReference
+            }
 
-        for hash in trimmedHashes {
-            try cherryPickOne(commitHash: hash, at: path, verbose: verbose)
+            for hash in trimmedHashes {
+                try cherryPickOne(commitHash: hash, at: path, verbose: verbose)
+            }
         }
     }
 
     public static func continueCherryPick(at path: String, verbose: Bool = true) throws {
-        if try hasMergeConflicts(at: path) {
-            throw LibGit2Error.mergeConflict
+        try LibGit2.serialized {
+            if try hasMergeConflicts(at: path) {
+                throw LibGit2Error.mergeConflict
+            }
+
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
+
+            var oid = git_oid()
+            guard git_reference_name_to_id(&oid, repo, "CHERRY_PICK_HEAD") == 0 else {
+                throw LibGit2Error.invalidReference
+            }
+
+            var commit: OpaquePointer?
+            defer { if commit != nil { git_commit_free(commit) } }
+            guard git_commit_lookup(&commit, repo, &oid) == 0, let commit else {
+                throw LibGit2Error.invalidReference
+            }
+
+            _ = try createCommit(message: commitMessage(commit), at: path, verbose: verbose)
+            git_repository_state_cleanup(repo)
         }
-
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-
-        var oid = git_oid()
-        guard git_reference_name_to_id(&oid, repo, "CHERRY_PICK_HEAD") == 0 else {
-            throw LibGit2Error.invalidReference
-        }
-
-        var commit: OpaquePointer?
-        defer { if commit != nil { git_commit_free(commit) } }
-        guard git_commit_lookup(&commit, repo, &oid) == 0, let commit else {
-            throw LibGit2Error.invalidReference
-        }
-
-        _ = try createCommit(message: commitMessage(commit), at: path, verbose: verbose)
-        git_repository_state_cleanup(repo)
     }
 
     public static func abortCherryPick(at path: String, verbose: Bool = true) throws {
-        try reset(to: nil, mode: "hard", at: path, verbose: verbose)
+        try LibGit2.serialized {
+            try reset(to: nil, mode: "hard", at: path, verbose: verbose)
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-        git_repository_state_cleanup(repo)
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
+            git_repository_state_cleanup(repo)
+        }
     }
 
     private static func cherryPickOne(commitHash: String, at path: String, verbose: Bool) throws {

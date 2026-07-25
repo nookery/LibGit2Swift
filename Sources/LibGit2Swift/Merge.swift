@@ -10,81 +10,83 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func merge(branchName: String, at path: String, verbose: Bool) throws {
-        if verbose { os_log("\(self.t)Merging branch: \(branchName)") }
+        try LibGit2.serialized {
+            if verbose { os_log("\(self.t)Merging branch: \(branchName)") }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        // 查找要合并的分支
-        let branchRef = "refs/heads/\(branchName)"
-        var branchRefPtr: OpaquePointer? = nil
-        defer { if branchRefPtr != nil { git_reference_free(branchRefPtr) } }
+            // 查找要合并的分支
+            let branchRef = "refs/heads/\(branchName)"
+            var branchRefPtr: OpaquePointer? = nil
+            defer { if branchRefPtr != nil { git_reference_free(branchRefPtr) } }
 
-        let lookupResult = git_reference_lookup(&branchRefPtr, repo, branchRef)
+            let lookupResult = git_reference_lookup(&branchRefPtr, repo, branchRef)
 
-        if lookupResult != 0 {
-            throw LibGit2Error.checkoutFailed(branchName)
+            if lookupResult != 0 {
+                throw LibGit2Error.checkoutFailed(branchName)
+            }
+
+            guard branchRefPtr != nil else {
+                throw LibGit2Error.invalidReference
+            }
+
+            // 获取分支的 annotated commit
+            var branchOID = git_oid()
+            git_reference_name_to_id(&branchOID, repo, branchRef)
+
+            var annotatedCommit: OpaquePointer? = nil
+            defer { if annotatedCommit != nil { git_annotated_commit_free(annotatedCommit) } }
+
+            if git_annotated_commit_lookup(&annotatedCommit, repo, &branchOID) != 0 {
+                throw LibGit2Error.mergeConflict
+            }
+
+            // 分析合并
+            var analysis = git_merge_analysis_t.init(0)
+            var preference = git_merge_preference_t.init(0)
+
+            var headOID = git_oid()
+            git_reference_name_to_id(&headOID, repo, "HEAD")
+
+            var headAnnotatedCommit: OpaquePointer? = nil
+            defer { if headAnnotatedCommit != nil { git_annotated_commit_free(headAnnotatedCommit) } }
+
+            git_annotated_commit_lookup(&headAnnotatedCommit, repo, &headOID)
+
+            git_merge_analysis(&analysis, &preference, repo, &annotatedCommit, 1)
+
+            // 检查是否已经是最新
+            if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
+                if verbose { os_log("\(self.t)Already up to date") }
+                return
+            }
+
+            // 执行合并
+            var mergeOpts = git_merge_options()
+            git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
+
+            var checkoutOpts = git_checkout_options()
+            git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+            checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+
+            let mergeResult = git_merge(repo, &annotatedCommit, 1, &mergeOpts, &checkoutOpts)
+
+            if mergeResult != 0 {
+                throw LibGit2Error.mergeConflict
+            }
+
+            // 检查是否有冲突
+            if try hasMergeConflicts(at: path) {
+                if verbose { os_log("\(self.t)Merge conflicts detected") }
+                throw LibGit2Error.mergeConflict
+            }
+
+            // 创建合并提交
+            try createMergeCommit(branchName: branchName, at: path, verbose: verbose)
+
+            if verbose { os_log("\(self.t)Merge completed successfully") }
         }
-
-        guard branchRefPtr != nil else {
-            throw LibGit2Error.invalidReference
-        }
-
-        // 获取分支的 annotated commit
-        var branchOID = git_oid()
-        git_reference_name_to_id(&branchOID, repo, branchRef)
-
-        var annotatedCommit: OpaquePointer? = nil
-        defer { if annotatedCommit != nil { git_annotated_commit_free(annotatedCommit) } }
-
-        if git_annotated_commit_lookup(&annotatedCommit, repo, &branchOID) != 0 {
-            throw LibGit2Error.mergeConflict
-        }
-
-        // 分析合并
-        var analysis = git_merge_analysis_t.init(0)
-        var preference = git_merge_preference_t.init(0)
-
-        var headOID = git_oid()
-        git_reference_name_to_id(&headOID, repo, "HEAD")
-
-        var headAnnotatedCommit: OpaquePointer? = nil
-        defer { if headAnnotatedCommit != nil { git_annotated_commit_free(headAnnotatedCommit) } }
-
-        git_annotated_commit_lookup(&headAnnotatedCommit, repo, &headOID)
-
-        git_merge_analysis(&analysis, &preference, repo, &annotatedCommit, 1)
-
-        // 检查是否已经是最新
-        if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
-            if verbose { os_log("\(self.t)Already up to date") }
-            return
-        }
-
-        // 执行合并
-        var mergeOpts = git_merge_options()
-        git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
-
-        var checkoutOpts = git_checkout_options()
-        git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-
-        let mergeResult = git_merge(repo, &annotatedCommit, 1, &mergeOpts, &checkoutOpts)
-
-        if mergeResult != 0 {
-            throw LibGit2Error.mergeConflict
-        }
-
-        // 检查是否有冲突
-        if try hasMergeConflicts(at: path) {
-            if verbose { os_log("\(self.t)Merge conflicts detected") }
-            throw LibGit2Error.mergeConflict
-        }
-
-        // 创建合并提交
-        try createMergeCommit(branchName: branchName, at: path, verbose: verbose)
-
-        if verbose { os_log("\(self.t)Merge completed successfully") }
     }
 
     /// 快进合并
@@ -187,27 +189,29 @@ extension LibGit2 {
     /// 中止合并
     /// - Parameter path: 仓库路径
     public static func abortMerge(at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("\(self.t)Aborting merge") }
+        try LibGit2.serialized {
+            if verbose { os_log("\(self.t)Aborting merge") }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        // 清理合并状态
-        git_repository_state_cleanup(repo)
+            // 清理合并状态
+            git_repository_state_cleanup(repo)
 
-        // 重置到 HEAD
-        var headOID = git_oid()
-        if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-            var headCommit: OpaquePointer? = nil
-            defer { if headCommit != nil { git_commit_free(headCommit) } }
+            // 重置到 HEAD
+            var headOID = git_oid()
+            if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+                var headCommit: OpaquePointer? = nil
+                defer { if headCommit != nil { git_commit_free(headCommit) } }
 
-            if git_commit_lookup(&headCommit, repo, &headOID) == 0 {
-                guard let headCommit else { return }
-                git_reset(repo, headCommit, GIT_RESET_HARD, nil)
+                if git_commit_lookup(&headCommit, repo, &headOID) == 0 {
+                    guard let headCommit else { return }
+                    git_reset(repo, headCommit, GIT_RESET_HARD, nil)
+                }
             }
-        }
 
-        if verbose { os_log("\(self.t)Merge aborted") }
+            if verbose { os_log("\(self.t)Merge aborted") }
+        }
     }
 
     /// 继续合并（解决冲突后创建合并提交）
@@ -215,22 +219,24 @@ extension LibGit2 {
     ///   - branchName: 分支名称
     ///   - path: 仓库路径
     public static func continueMerge(branchName: String, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("\(self.t)Continuing merge") }
+        try LibGit2.serialized {
+            if verbose { os_log("\(self.t)Continuing merge") }
 
-        if try hasMergeConflicts(at: path) {
-            throw LibGit2Error.mergeConflict
+            if try hasMergeConflicts(at: path) {
+                throw LibGit2Error.mergeConflict
+            }
+
+            // 创建合并提交
+            try createMergeCommit(branchName: branchName, at: path, verbose: verbose)
+
+            // 清理合并状态
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
+
+            git_repository_state_cleanup(repo)
+
+            if verbose { os_log("\(self.t)Merge continued") }
         }
-
-        // 创建合并提交
-        try createMergeCommit(branchName: branchName, at: path, verbose: verbose)
-
-        // 清理合并状态
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-
-        git_repository_state_cleanup(repo)
-
-        if verbose { os_log("\(self.t)Merge continued") }
     }
 
     // MARK: - 私有辅助方法

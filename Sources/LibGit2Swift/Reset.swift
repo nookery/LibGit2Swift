@@ -11,50 +11,52 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func reset(to commitHash: String?, mode: String, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Resetting to %{public}@ with mode: %{public}@", commitHash ?? "HEAD", mode) }
+        try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Resetting to %{public}@ with mode: %{public}@", commitHash ?? "HEAD", mode) }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var targetOID = git_oid()
+            var targetOID = git_oid()
 
-        if let commitHash = commitHash {
-            guard git_oid_fromstr(&targetOID, commitHash) == 0 else {
+            if let commitHash = commitHash {
+                guard git_oid_fromstr(&targetOID, commitHash) == 0 else {
+                    throw LibGit2Error.invalidValue
+                }
+            } else {
+                if git_reference_name_to_id(&targetOID, repo, "HEAD") != 0 {
+                    throw LibGit2Error.cannotGetHEAD
+                }
+            }
+
+            var commit: OpaquePointer? = nil
+            defer { if commit != nil { git_commit_free(commit) } }
+
+            guard git_commit_lookup(&commit, repo, &targetOID) == 0,
+                  let commitPtr = commit else {
                 throw LibGit2Error.invalidValue
             }
-        } else {
-            if git_reference_name_to_id(&targetOID, repo, "HEAD") != 0 {
-                throw LibGit2Error.cannotGetHEAD
+
+            let resetType: git_reset_t
+            switch mode.lowercased() {
+            case "soft":
+                resetType = GIT_RESET_SOFT
+            case "mixed":
+                resetType = GIT_RESET_MIXED
+            case "hard":
+                resetType = GIT_RESET_HARD
+            default:
+                resetType = GIT_RESET_MIXED
             }
+
+            let result = git_reset(repo, commitPtr, resetType, nil)
+
+            if result != 0 {
+                throw LibGit2Error.checkoutFailed(commitHash ?? "HEAD")
+            }
+
+            if verbose { os_log("🐚 LibGit2: Reset completed") }
         }
-
-        var commit: OpaquePointer? = nil
-        defer { if commit != nil { git_commit_free(commit) } }
-
-        guard git_commit_lookup(&commit, repo, &targetOID) == 0,
-              let commitPtr = commit else {
-            throw LibGit2Error.invalidValue
-        }
-
-        let resetType: git_reset_t
-        switch mode.lowercased() {
-        case "soft":
-            resetType = GIT_RESET_SOFT
-        case "mixed":
-            resetType = GIT_RESET_MIXED
-        case "hard":
-            resetType = GIT_RESET_HARD
-        default:
-            resetType = GIT_RESET_MIXED
-        }
-
-        let result = git_reset(repo, commitPtr, resetType, nil)
-
-        if result != 0 {
-            throw LibGit2Error.checkoutFailed(commitHash ?? "HEAD")
-        }
-
-        if verbose { os_log("🐚 LibGit2: Reset completed") }
     }
 
     /// 软重置（保留工作区和暂存区变更）

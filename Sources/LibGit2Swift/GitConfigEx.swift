@@ -4,29 +4,33 @@ import Foundation
 extension LibGit2 {
     /// 列出仓库级别的所有配置项。
     public static func listConfig(at path: String) throws -> [(key: String, value: String)] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var config: OpaquePointer?
-        defer { if config != nil { git_config_free(config) } }
+            var config: OpaquePointer?
+            defer { if config != nil { git_config_free(config) } }
 
-        guard git_repository_config(&config, repo) == 0, let config else {
-            throw LibGit2Error.configNotFound
+            guard git_repository_config(&config, repo) == 0, let config else {
+                throw LibGit2Error.configNotFound
+            }
+
+            return listConfigEntries(config)
         }
-
-        return listConfigEntries(config)
     }
 
     /// 列出全局配置的所有配置项。
     public static func listGlobalConfig() throws -> [(key: String, value: String)] {
-        var config: OpaquePointer?
-        defer { if config != nil { git_config_free(config) } }
+        return try LibGit2.serialized {
+            var config: OpaquePointer?
+            defer { if config != nil { git_config_free(config) } }
 
-        guard git_config_open_default(&config) == 0, let config else {
-            throw LibGit2Error.configNotFound
+            guard git_config_open_default(&config) == 0, let config else {
+                throw LibGit2Error.configNotFound
+            }
+
+            return listConfigEntries(config)
         }
-
-        return listConfigEntries(config)
     }
 
     // MARK: - Private

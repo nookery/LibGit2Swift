@@ -42,100 +42,102 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更（true = index vs HEAD，false = workdir vs index）
     /// - Returns: 按行号排序的 hunk 列表
     public static func getDiffHunks(for filePath: String, at path: String, staged: Bool = false) throws -> [GitDiffHunk] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var diff: OpaquePointer?
-        defer { if diff != nil { git_diff_free(diff) } }
+            var diff: OpaquePointer?
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        if staged {
-            var index: OpaquePointer?
-            defer { if index != nil { git_index_free(index) } }
-            guard git_repository_index(&index, repo) == 0, let index else {
-                throw LibGit2Error.cannotGetIndex
-            }
+            if staged {
+                var index: OpaquePointer?
+                defer { if index != nil { git_index_free(index) } }
+                guard git_repository_index(&index, repo) == 0, let index else {
+                    throw LibGit2Error.cannotGetIndex
+                }
 
-            var tree: OpaquePointer?
-            defer { if tree != nil { git_tree_free(tree) } }
+                var tree: OpaquePointer?
+                defer { if tree != nil { git_tree_free(tree) } }
 
-            var headOID = git_oid()
-            if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
-                var commit: OpaquePointer?
-                defer { if commit != nil { git_commit_free(commit) } }
-                if git_commit_lookup(&commit, repo, &headOID) == 0 {
-                    git_commit_tree(&tree, commit)
+                var headOID = git_oid()
+                if git_reference_name_to_id(&headOID, repo, "HEAD") == 0 {
+                    var commit: OpaquePointer?
+                    defer { if commit != nil { git_commit_free(commit) } }
+                    if git_commit_lookup(&commit, repo, &headOID) == 0 {
+                        git_commit_tree(&tree, commit)
+                    }
+                }
+
+                git_diff_tree_to_index(&diff, repo, tree, index, nil)
+            } else {
+                var index: OpaquePointer?
+                defer { if index != nil { git_index_free(index) } }
+                guard git_repository_index(&index, repo) == 0, let index else {
+                    throw LibGit2Error.cannotGetIndex
+                }
+
+                var opts = git_diff_options()
+                git_diff_init_options(&opts, UInt32(GIT_DIFF_OPTIONS_VERSION))
+                opts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue | GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+
+                var pathC: UnsafeMutablePointer<CChar>? = strdup(filePath)
+                defer { free(pathC) }
+                var pathspecStrings: [UnsafeMutablePointer<CChar>?] = [pathC]
+                pathspecStrings.withUnsafeMutableBufferPointer { buffer in
+                    guard let baseAddr = buffer.baseAddress else { return }
+                    var spec = git_strarray(strings: baseAddr, count: 1)
+                    opts.pathspec = spec
+                    git_diff_index_to_workdir(&diff, repo, index, &opts)
                 }
             }
 
-            git_diff_tree_to_index(&diff, repo, tree, index, nil)
-        } else {
-            var index: OpaquePointer?
-            defer { if index != nil { git_index_free(index) } }
-            guard git_repository_index(&index, repo) == 0, let index else {
-                throw LibGit2Error.cannotGetIndex
-            }
+            guard let diffPtr = diff else { return [] }
 
-            var opts = git_diff_options()
-            git_diff_init_options(&opts, UInt32(GIT_DIFF_OPTIONS_VERSION))
-            opts.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue | GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+            let deltaCount = git_diff_num_deltas(diffPtr)
+            var hunks: [GitDiffHunk] = []
 
-            var pathC: UnsafeMutablePointer<CChar>? = strdup(filePath)
-            defer { free(pathC) }
-            var pathspecStrings: [UnsafeMutablePointer<CChar>?] = [pathC]
-            pathspecStrings.withUnsafeMutableBufferPointer { buffer in
-                guard let baseAddr = buffer.baseAddress else { return }
-                var spec = git_strarray(strings: baseAddr, count: 1)
-                opts.pathspec = spec
-                git_diff_index_to_workdir(&diff, repo, index, &opts)
-            }
-        }
+            for i in 0..<deltaCount {
+                guard let delta = git_diff_get_delta(diffPtr, i) else { continue }
+                let deltaPath = String(cString: delta.pointee.new_file.path)
+                guard deltaPath == filePath else { continue }
 
-        guard let diffPtr = diff else { return [] }
+                var patch: OpaquePointer?
+                defer { if patch != nil { git_patch_free(patch) } }
 
-        let deltaCount = git_diff_num_deltas(diffPtr)
-        var hunks: [GitDiffHunk] = []
-
-        for i in 0..<deltaCount {
-            guard let delta = git_diff_get_delta(diffPtr, i) else { continue }
-            let deltaPath = String(cString: delta.pointee.new_file.path)
-            guard deltaPath == filePath else { continue }
-
-            var patch: OpaquePointer?
-            defer { if patch != nil { git_patch_free(patch) } }
-
-            guard git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch else {
-                continue
-            }
-
-            let hunkCount = git_patch_num_hunks(patchPtr)
-            for j in 0..<hunkCount {
-                var hunkPtr: UnsafePointer<git_diff_hunk>?
-                var linesInHunk = 0
-                guard git_patch_get_hunk(&hunkPtr, &linesInHunk, patchPtr, j) == 0,
-                      let hunkInfo = hunkPtr else {
+                guard git_patch_from_diff(&patch, diffPtr, i) == 0, let patchPtr = patch else {
                     continue
                 }
 
-                let headerData = withUnsafeBytes(of: hunkInfo.pointee.header) { ptr in
-                    Data(bytes: ptr.baseAddress!, count: ptr.count)
+                let hunkCount = git_patch_num_hunks(patchPtr)
+                for j in 0..<hunkCount {
+                    var hunkPtr: UnsafePointer<git_diff_hunk>?
+                    var linesInHunk = 0
+                    guard git_patch_get_hunk(&hunkPtr, &linesInHunk, patchPtr, j) == 0,
+                          let hunkInfo = hunkPtr else {
+                        continue
+                    }
+
+                    let headerData = withUnsafeBytes(of: hunkInfo.pointee.header) { ptr in
+                        Data(bytes: ptr.baseAddress!, count: ptr.count)
+                    }
+                    let header = String(data: headerData, encoding: .utf8)?.split(separator: "\0").first.map(String.init) ?? ""
+                    let oldStart = Int(hunkInfo.pointee.old_start)
+                    let oldLines = Int(hunkInfo.pointee.old_lines)
+                    let newStart = Int(hunkInfo.pointee.new_start)
+                    let newLines = Int(hunkInfo.pointee.new_lines)
+
+                    hunks.append(GitDiffHunk(
+                        oldStart: oldStart,
+                        oldLines: oldLines,
+                        newStart: newStart,
+                        newLines: newLines,
+                        rawPatch: header
+                    ))
                 }
-                let header = String(data: headerData, encoding: .utf8)?.split(separator: "\0").first.map(String.init) ?? ""
-                let oldStart = Int(hunkInfo.pointee.old_start)
-                let oldLines = Int(hunkInfo.pointee.old_lines)
-                let newStart = Int(hunkInfo.pointee.new_start)
-                let newLines = Int(hunkInfo.pointee.new_lines)
-
-                hunks.append(GitDiffHunk(
-                    oldStart: oldStart,
-                    oldLines: oldLines,
-                    newStart: newStart,
-                    newLines: newLines,
-                    rawPatch: header
-                ))
             }
-        }
 
-        return hunks
+            return hunks
+        }
     }
 
     // MARK: - Hunk 应用
@@ -147,31 +149,33 @@ extension LibGit2 {
     ///   - mode: 应用到暂存区还是从暂存区移除
     ///   - path: 仓库路径
     public static func applyHunk(_ hunk: String, mode: GitPatchApplyMode, at path: String) throws {
-        // 确保 hunk 以换行结尾
-        let normalizedHunk = hunk.hasSuffix("\n") ? hunk : hunk + "\n"
-        let patchToApply = mode == .stage ? normalizedHunk : reversePatch(normalizedHunk)
+        try LibGit2.serialized {
+            // 确保 hunk 以换行结尾
+            let normalizedHunk = hunk.hasSuffix("\n") ? hunk : hunk + "\n"
+            let patchToApply = mode == .stage ? normalizedHunk : reversePatch(normalizedHunk)
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        // 先尝试用 git_apply
-        var diff: OpaquePointer?
-        defer { if diff != nil { git_diff_free(diff) } }
+            // 先尝试用 git_apply
+            var diff: OpaquePointer?
+            defer { if diff != nil { git_diff_free(diff) } }
 
-        let parseResult = patchToApply.withCString { buffer in
-            git_diff_from_buffer(&diff, buffer, strlen(buffer))
-        }
-
-        if parseResult == 0, let diff {
-            var opts = git_apply_options()
-            git_apply_options_init(&opts, UInt32(GIT_APPLY_OPTIONS_VERSION))
-            if git_apply(repo, diff, GIT_APPLY_LOCATION_INDEX, &opts) == 0 {
-                return
+            let parseResult = patchToApply.withCString { buffer in
+                git_diff_from_buffer(&diff, buffer, strlen(buffer))
             }
-        }
 
-        // 回退到手动解析 text patch
-        try applyPatchManually(patchToApply, repo: repo)
+            if parseResult == 0, let diff {
+                var opts = git_apply_options()
+                git_apply_options_init(&opts, UInt32(GIT_APPLY_OPTIONS_VERSION))
+                if git_apply(repo, diff, GIT_APPLY_LOCATION_INDEX, &opts) == 0 {
+                    return
+                }
+            }
+
+            // 回退到手动解析 text patch
+            try applyPatchManually(patchToApply, repo: repo)
+        }
     }
 
     // MARK: - Private Helpers

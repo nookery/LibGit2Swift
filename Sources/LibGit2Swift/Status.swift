@@ -10,110 +10,114 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 如果有未提交的变更返回 true
     public static func hasUncommittedChanges(at path: String, verbose: Bool = true) throws -> Bool {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var statusOpts = git_status_options()
-        git_status_init_options(&statusOpts, UInt32(GIT_STATUS_OPTIONS_VERSION))
-        statusOpts.flags = GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue |
-                          GIT_STATUS_OPT_RECURSE_IGNORED_DIRS.rawValue
-        // 注意：不包含 GIT_STATUS_OPT_INCLUDE_UNTRACKED，所以未跟踪文件不会被计算在内
+            var statusOpts = git_status_options()
+            git_status_init_options(&statusOpts, UInt32(GIT_STATUS_OPTIONS_VERSION))
+            statusOpts.flags = GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue |
+                              GIT_STATUS_OPT_RECURSE_IGNORED_DIRS.rawValue
+            // 注意：不包含 GIT_STATUS_OPT_INCLUDE_UNTRACKED，所以未跟踪文件不会被计算在内
 
-        var statusList: OpaquePointer? = nil
-        defer { if statusList != nil { git_status_list_free(statusList) } }
+            var statusList: OpaquePointer? = nil
+            defer { if statusList != nil { git_status_list_free(statusList) } }
 
-        let result = git_status_list_new(&statusList, repo, &statusOpts)
+            let result = git_status_list_new(&statusList, repo, &statusOpts)
 
-        if result != 0 {
-            throw LibGit2Error.cannotGetStatus
+            if result != 0 {
+                throw LibGit2Error.cannotGetStatus
+            }
+
+            guard let statusList else { return false }
+            let count = git_status_list_entrycount(statusList)
+
+            if verbose { os_log("\(t)Uncommitted changes count: \(count)") }
+
+            return count > 0
         }
-
-        guard let statusList else { return false }
-        let count = git_status_list_entrycount(statusList)
-
-        if verbose { os_log("\(t)Uncommitted changes count: \(count)") }
-
-        return count > 0
     }
 
     /// 获取状态信息（类似 git status）
     /// - Parameter path: 仓库路径
     /// - Returns: 状态信息字符串
     public static func getStatus(at path: String, verbose: Bool = true) throws -> String {
-        if verbose { os_log("\(t) Getting status at path: \(path)") }
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            if verbose { os_log("\(t) Getting status at path: \(path)") }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var statusOpts = git_status_options()
-        git_status_init_options(&statusOpts, UInt32(GIT_STATUS_OPTIONS_VERSION))
-        statusOpts.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue |
-                          GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
+            var statusOpts = git_status_options()
+            git_status_init_options(&statusOpts, UInt32(GIT_STATUS_OPTIONS_VERSION))
+            statusOpts.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue |
+                              GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
 
-        var statusList: OpaquePointer? = nil
-        defer { if statusList != nil { git_status_list_free(statusList) } }
+            var statusList: OpaquePointer? = nil
+            defer { if statusList != nil { git_status_list_free(statusList) } }
 
-        let result = git_status_list_new(&statusList, repo, &statusOpts)
+            let result = git_status_list_new(&statusList, repo, &statusOpts)
 
-        if result != 0 {
-            throw LibGit2Error.cannotGetStatus
-        }
+            if result != 0 {
+                throw LibGit2Error.cannotGetStatus
+            }
 
-        var output = ""
-        guard let statusList else { return "" }
-        let count = git_status_list_entrycount(statusList)
+            var output = ""
+            guard let statusList else { return "" }
+            let count = git_status_list_entrycount(statusList)
 
-        for i in 0..<count {
-            if let entry = git_status_byindex(statusList, i) {
-                let status = entry.pointee.status
+            for i in 0..<count {
+                if let entry = git_status_byindex(statusList, i) {
+                    let status = entry.pointee.status
 
-                // 解析状态标志
-                var statusStr = ""
-                let statusRaw = status.rawValue
-                if statusRaw & GIT_STATUS_INDEX_NEW.rawValue != 0 {
-                    statusStr += "A"
-                } else if statusRaw & GIT_STATUS_INDEX_MODIFIED.rawValue != 0 {
-                    statusStr += "M"
-                } else if statusRaw & GIT_STATUS_INDEX_DELETED.rawValue != 0 {
-                    statusStr += "D"
-                } else if statusRaw & GIT_STATUS_INDEX_RENAMED.rawValue != 0 {
-                    statusStr += "R"
-                } else if statusRaw & GIT_STATUS_INDEX_TYPECHANGE.rawValue != 0 {
-                    statusStr += "T"
-                } else if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
-                    // 未跟踪文件在索引中显示为 ?
-                    statusStr += "?"
-                } else {
-                    statusStr += " "
-                }
+                    // 解析状态标志
+                    var statusStr = ""
+                    let statusRaw = status.rawValue
+                    if statusRaw & GIT_STATUS_INDEX_NEW.rawValue != 0 {
+                        statusStr += "A"
+                    } else if statusRaw & GIT_STATUS_INDEX_MODIFIED.rawValue != 0 {
+                        statusStr += "M"
+                    } else if statusRaw & GIT_STATUS_INDEX_DELETED.rawValue != 0 {
+                        statusStr += "D"
+                    } else if statusRaw & GIT_STATUS_INDEX_RENAMED.rawValue != 0 {
+                        statusStr += "R"
+                    } else if statusRaw & GIT_STATUS_INDEX_TYPECHANGE.rawValue != 0 {
+                        statusStr += "T"
+                    } else if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
+                        // 未跟踪文件在索引中显示为 ?
+                        statusStr += "?"
+                    } else {
+                        statusStr += " "
+                    }
 
-                if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
-                    statusStr += "?"
-                } else if statusRaw & GIT_STATUS_WT_MODIFIED.rawValue != 0 {
-                    statusStr += "M"
-                } else if statusRaw & GIT_STATUS_WT_DELETED.rawValue != 0 {
-                    statusStr += "D"
-                } else if statusRaw & GIT_STATUS_WT_RENAMED.rawValue != 0 {
-                    statusStr += "R"
-                } else if statusRaw & GIT_STATUS_WT_TYPECHANGE.rawValue != 0 {
-                    statusStr += "T"
-                } else if statusRaw & GIT_STATUS_IGNORED.rawValue != 0 {
-                    statusStr += "!"
-                } else {
-                    statusStr += " "
-                }
+                    if statusRaw & GIT_STATUS_WT_NEW.rawValue != 0 {
+                        statusStr += "?"
+                    } else if statusRaw & GIT_STATUS_WT_MODIFIED.rawValue != 0 {
+                        statusStr += "M"
+                    } else if statusRaw & GIT_STATUS_WT_DELETED.rawValue != 0 {
+                        statusStr += "D"
+                    } else if statusRaw & GIT_STATUS_WT_RENAMED.rawValue != 0 {
+                        statusStr += "R"
+                    } else if statusRaw & GIT_STATUS_WT_TYPECHANGE.rawValue != 0 {
+                        statusStr += "T"
+                    } else if statusRaw & GIT_STATUS_IGNORED.rawValue != 0 {
+                        statusStr += "!"
+                    } else {
+                        statusStr += " "
+                    }
 
-                // 获取文件路径
-                let pathPtr = entry.pointee.head_to_index?.pointee.old_file.path
-                           ?? entry.pointee.index_to_workdir?.pointee.old_file.path
+                    // 获取文件路径
+                    let pathPtr = entry.pointee.head_to_index?.pointee.old_file.path
+                               ?? entry.pointee.index_to_workdir?.pointee.old_file.path
 
-                if let filePath = pathPtr {
-                    let fileName = String(cString: filePath)
-                    output += "\(statusStr) \(fileName)\n"
+                    if let filePath = pathPtr {
+                        let fileName = String(cString: filePath)
+                        output += "\(statusStr) \(fileName)\n"
+                    }
                 }
             }
-        }
 
-        return output
+            return output
+        }
     }
 
     /// 获取简洁状态信息（类似 git status --porcelain）

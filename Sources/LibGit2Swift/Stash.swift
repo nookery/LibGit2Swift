@@ -40,19 +40,21 @@ public struct GitStashEntry: Identifiable, Equatable, Hashable, Sendable {
 extension LibGit2 {
     /// 获取增强的暂存列表（包含日期、文件数、diff 预览）。
     public static func getStashListEnhanced(at path: String) throws -> [GitStashEntry] {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+        return try LibGit2.serialized {
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let payload = StashListPayload()
-        let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
+            let payload = StashListPayload()
+            let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
 
-        let result = git_stash_foreach(repo, stashForeachCallback, payloadPointer)
+            let result = git_stash_foreach(repo, stashForeachCallback, payloadPointer)
 
-        if result != 0 {
-            throw LibGit2Error.commitFailed
+            if result != 0 {
+                throw LibGit2Error.commitFailed
+            }
+
+            return payload.stashes
         }
-
-        return payload.stashes
     }
 
     private static let stashForeachCallback: git_stash_cb = { index, message, stashID, payload in
@@ -84,37 +86,39 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 暂存索引
     public static func stash(message: String? = nil, at path: String, verbose: Bool = true) throws -> Int {
-        if verbose { os_log("🐚 LibGit2: Stashing changes") }
+        return try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Stashing changes") }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        // 创建签名
-        let signature = try createSignature(at: path, verbose: verbose)
-        defer { git_signature_free(signature) }
+            // 创建签名
+            let signature = try createSignature(at: path, verbose: verbose)
+            defer { git_signature_free(signature) }
 
-        var commitOID = git_oid()
+            var commitOID = git_oid()
 
-        let result = git_stash_save(
-            &commitOID,
-            repo,
-            signature,
-            message ?? "WIP",
-            UInt32(GIT_STASH_INCLUDE_UNTRACKED.rawValue)
-        )
+            let result = git_stash_save(
+                &commitOID,
+                repo,
+                signature,
+                message ?? "WIP",
+                UInt32(GIT_STASH_INCLUDE_UNTRACKED.rawValue)
+            )
 
-        if result == GIT_ENOTFOUND.rawValue {
-            if verbose { os_log("🐚 LibGit2: No changes to stash") }
-            return -1
+            if result == GIT_ENOTFOUND.rawValue {
+                if verbose { os_log("🐚 LibGit2: No changes to stash") }
+                return -1
+            }
+
+            if result != 0 {
+                throw LibGit2Error.commitFailed
+            }
+
+            if verbose { os_log("🐚 LibGit2: Changes stashed at index: 0") }
+
+            return 0
         }
-
-        if result != 0 {
-            throw LibGit2Error.commitFailed
-        }
-
-        if verbose { os_log("🐚 LibGit2: Changes stashed at index: 0") }
-
-        return 0
     }
 
     /// 恢复暂存的变更
@@ -123,21 +127,23 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashPop(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Popping stash at index: %d", index) }
+        try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Popping stash at index: %d", index) }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var stashOpts = git_stash_apply_options()
-        git_stash_apply_init_options(&stashOpts, UInt32(GIT_STASH_APPLY_OPTIONS_VERSION))
+            var stashOpts = git_stash_apply_options()
+            git_stash_apply_init_options(&stashOpts, UInt32(GIT_STASH_APPLY_OPTIONS_VERSION))
 
-        let result = git_stash_pop(repo, index, &stashOpts)
+            let result = git_stash_pop(repo, index, &stashOpts)
 
-        if result != 0 {
-            throw LibGit2Error.commitFailed
+            if result != 0 {
+                throw LibGit2Error.commitFailed
+            }
+
+            if verbose { os_log("🐚 LibGit2: Stash popped successfully") }
         }
-
-        if verbose { os_log("🐚 LibGit2: Stash popped successfully") }
     }
 
     /// 应用暂存的变更（不从 stash 列表中删除）
@@ -146,31 +152,35 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashApply(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Applying stash at index: %d", index) }
+        try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Applying stash at index: %d", index) }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        var stashOpts = git_stash_apply_options()
-        git_stash_apply_init_options(&stashOpts, UInt32(GIT_STASH_APPLY_OPTIONS_VERSION))
-        
-        stashOpts.checkout_options.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+            var stashOpts = git_stash_apply_options()
+            git_stash_apply_init_options(&stashOpts, UInt32(GIT_STASH_APPLY_OPTIONS_VERSION))
 
-        let result = git_stash_apply(repo, index, &stashOpts)
+            stashOpts.checkout_options.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
 
-        if result != 0 {
-            throw LibGit2Error.commitFailed
+            let result = git_stash_apply(repo, index, &stashOpts)
+
+            if result != 0 {
+                throw LibGit2Error.commitFailed
+            }
+
+            if verbose { os_log("🐚 LibGit2: Stash applied successfully") }
         }
-
-        if verbose { os_log("🐚 LibGit2: Stash applied successfully") }
     }
 
     /// 获取暂存列表
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存信息列表
     public static func getStashList(at path: String) throws -> [(index: Int, message: String, commitHash: String)] {
-        let enhanced = try getStashListEnhanced(at: path)
-        return enhanced.map { ($0.index, $0.message, $0.commitHash) }
+        return try LibGit2.serialized {
+            let enhanced = try getStashListEnhanced(at: path)
+            return enhanced.map { ($0.index, $0.message, $0.commitHash) }
+        }
     }
 
     /// 删除暂存
@@ -179,61 +189,65 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashDrop(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Dropping stash at index: %d", index) }
+        try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Dropping stash at index: %d", index) }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let result = git_stash_drop(repo, index)
+            let result = git_stash_drop(repo, index)
 
-        if result != 0 {
-            throw LibGit2Error.commitFailed
+            if result != 0 {
+                throw LibGit2Error.commitFailed
+            }
+
+            if verbose { os_log("🐚 LibGit2: Stash dropped successfully") }
         }
-
-        if verbose { os_log("🐚 LibGit2: Stash dropped successfully") }
     }
 
     /// Create a branch at the stash base commit, check it out, apply the stash, then drop it.
     public static func stashBranch(name branchName: String, index: Int, at path: String, verbose: Bool = true) throws {
-        let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedName.isEmpty == false else {
-            throw LibGit2Error.invalidReference
+        try LibGit2.serialized {
+            let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedName.isEmpty == false else {
+                throw LibGit2Error.invalidReference
+            }
+
+            let stashes = try getStashList(at: path)
+            guard let stash = stashes.first(where: { $0.index == index }) else {
+                throw LibGit2Error.invalidReference
+            }
+
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
+
+            var stashOID = git_oid()
+            guard git_oid_fromstr(&stashOID, stash.commitHash) == 0 else {
+                throw LibGit2Error.invalidReference
+            }
+
+            var stashCommit: OpaquePointer?
+            defer { if stashCommit != nil { git_commit_free(stashCommit) } }
+            guard git_commit_lookup(&stashCommit, repo, &stashOID) == 0, let stashCommit else {
+                throw LibGit2Error.invalidReference
+            }
+
+            var baseCommit: OpaquePointer?
+            defer { if baseCommit != nil { git_commit_free(baseCommit) } }
+            guard git_commit_parent(&baseCommit, stashCommit, 0) == 0, let baseCommit else {
+                throw LibGit2Error.invalidReference
+            }
+
+            var branchRef: OpaquePointer?
+            defer { if branchRef != nil { git_reference_free(branchRef) } }
+            guard git_branch_create(&branchRef, repo, trimmedName, baseCommit, 0) == 0 else {
+                throw LibGit2Error.invalidReference
+            }
+
+            try checkout(branch: trimmedName, at: path, verbose: verbose)
+            try stashApply(index: index, at: path, verbose: verbose)
+            try stashDrop(index: index, at: path, verbose: verbose)
         }
-
-        let stashes = try getStashList(at: path)
-        guard let stash = stashes.first(where: { $0.index == index }) else {
-            throw LibGit2Error.invalidReference
-        }
-
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-
-        var stashOID = git_oid()
-        guard git_oid_fromstr(&stashOID, stash.commitHash) == 0 else {
-            throw LibGit2Error.invalidReference
-        }
-
-        var stashCommit: OpaquePointer?
-        defer { if stashCommit != nil { git_commit_free(stashCommit) } }
-        guard git_commit_lookup(&stashCommit, repo, &stashOID) == 0, let stashCommit else {
-            throw LibGit2Error.invalidReference
-        }
-
-        var baseCommit: OpaquePointer?
-        defer { if baseCommit != nil { git_commit_free(baseCommit) } }
-        guard git_commit_parent(&baseCommit, stashCommit, 0) == 0, let baseCommit else {
-            throw LibGit2Error.invalidReference
-        }
-
-        var branchRef: OpaquePointer?
-        defer { if branchRef != nil { git_reference_free(branchRef) } }
-        guard git_branch_create(&branchRef, repo, trimmedName, baseCommit, 0) == 0 else {
-            throw LibGit2Error.invalidReference
-        }
-
-        try checkout(branch: trimmedName, at: path, verbose: verbose)
-        try stashApply(index: index, at: path, verbose: verbose)
-        try stashDrop(index: index, at: path, verbose: verbose)
     }
 
     /// 清空所有暂存
@@ -241,33 +255,39 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashClear(at path: String, verbose: Bool = true) throws {
-        if verbose { os_log("🐚 LibGit2: Clearing all stashes") }
+        try LibGit2.serialized {
+            if verbose { os_log("🐚 LibGit2: Clearing all stashes") }
 
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
+            let repo = try openRepository(at: path)
+            defer { git_repository_free(repo) }
 
-        let count = try getStashCount(at: path)
+            let count = try getStashCount(at: path)
 
-        // 从后往前删除，避免索引问题
-        for i in stride(from: count - 1, through: 0, by: -1) {
-            git_stash_drop(repo, i)
+            // 从后往前删除，避免索引问题
+            for i in stride(from: count - 1, through: 0, by: -1) {
+                git_stash_drop(repo, i)
+            }
+
+            if verbose { os_log("🐚 LibGit2: All stashes cleared") }
         }
-
-        if verbose { os_log("🐚 LibGit2: All stashes cleared") }
     }
 
     /// 获取暂存数量
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存数量
     public static func getStashCount(at path: String) throws -> Int {
-        let stashes = try getStashList(at: path)
-        return stashes.count
+        return try LibGit2.serialized {
+            let stashes = try getStashList(at: path)
+            return stashes.count
+        }
     }
 
     /// 检查是否有暂存
     /// - Parameter path: 仓库路径
     /// - Returns: 如果有暂存返回 true
     public static func hasStash(at path: String) throws -> Bool {
-        return try getStashCount(at: path) > 0
+        return try LibGit2.serialized {
+            return try getStashCount(at: path) > 0
+        }
     }
 }
