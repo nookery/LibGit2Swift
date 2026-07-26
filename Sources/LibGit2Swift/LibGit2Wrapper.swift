@@ -26,11 +26,28 @@ public class LibGit2: SuperLog {
 
     private static let queueSpecificKey = DispatchSpecificKey<Void>()
 
+    /// 首次进入任何 API 前确保 C 层完成初始化（恰好一次）。
+    ///
+    /// 若从未调用 `git_libgit2_init()`，`errors.c` 的 `_tls_key` 保持为 0，
+    /// libgit2 错误处理路径会把 TSD 0 号槽（macOS 保留给 PAC 签名的
+    /// `pthread_self` 值）当作自己的 TLS 存储读写，导致宿主进程随机
+    /// `EXC_BREAKPOINT`（`pthread_self` PAC 校验失败，`brk #0xc473`，
+    /// 崩溃现场 TSD 槽内为 `&git_str__oom`）。该 bug 曾在生产环境多次出现，
+    /// 仅发生在从未显式调用 `initialize()` 的宿主 App 中。
+    ///
+    /// `static let` 的惰性初始化自带 dispatch_once 语义，线程安全。
+    /// 与 `initialize()` 的引用计数相互独立：这里多出来的一次 C 层 init
+    /// 永不 shutdown，保证 C 层在进程生命周期内始终可用。
+    private static let cLayerInitialized: Void = {
+        git_libgit2_init()
+    }()
+
     /// 在串行访问队列上执行 `body`。
     ///
     /// 已处于访问队列上的调用（公开方法之间互相调用）直接执行，避免串行队列
     /// `sync` 嵌套造成死锁。
     static func serialized<T>(_ body: () throws -> T) rethrows -> T {
+        _ = cLayerInitialized
         if DispatchQueue.getSpecific(key: queueSpecificKey) != nil {
             return try body()
         }
