@@ -60,7 +60,7 @@ extension LibGit2 {
                                         // 如果添加失败，尝试移除文件（用于删除的文件）
                                         result = git_index_remove_bypath(indexPtr, filePath)
                                         if result != 0 {
-                                            if verbose { os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@", String(cString: filePath)) }
+                                            if verbose { os_log("%{public}@⚠️ Failed to add/remove file: %{public}@", self.t, String(cString: filePath)) }
                                         }
                                     }
                                 }
@@ -89,18 +89,18 @@ extension LibGit2 {
                         }
 
                         if result != 0 {
-                            if verbose { os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result) }
+                            if verbose { os_log("%{public}@⚠️ Failed to add files with pattern: %{public}@ (error: %d)", self.t, file, result) }
                         } else {
-                            if verbose { os_log("🐚 LibGit2: Added files with pattern: %{public}@", file) }
+                            if verbose { os_log("%{public}@Added files with pattern: %{public}@", self.t, file) }
                         }
 
                         // 清理
                         free(cString)
 
                         if result != 0 {
-                            if verbose { os_log("⚠️ LibGit2: Failed to add files with pattern: %{public}@ (error: %d)", file, result) }
+                            if verbose { os_log("%{public}@⚠️ Failed to add files with pattern: %{public}@ (error: %d)", self.t, file, result) }
                         } else {
-                            if verbose { os_log("🐚 LibGit2: Added files with pattern: %{public}@", file) }
+                            if verbose { os_log("%{public}@Added files with pattern: %{public}@", self.t, file) }
                         }
                     } else {
                         // 首先尝试添加文件（用于新增或修改的文件）
@@ -119,22 +119,22 @@ extension LibGit2 {
                                 }
                                 free(cString)
                                 if result == 0 {
-                                    if verbose { os_log("🐚 LibGit2: Added directory recursively: %{public}@", file) }
+                                    if verbose { os_log("%{public}@Added directory recursively: %{public}@", self.t, file) }
                                 } else {
-                                    if verbose { os_log("⚠️ LibGit2: Failed to add directory: %{public}@ (error: %d)", file, result) }
+                                    if verbose { os_log("%{public}@⚠️ Failed to add directory: %{public}@ (error: %d)", self.t, file, result) }
                                 }
                             } else {
                                 // 如果添加失败，尝试移除文件（用于删除的文件）
                                 result = git_index_remove_bypath(indexPtr, file)
                                 if result != 0 {
                                     // 对于真正不存在的文件，我们不抛出错误，而是继续处理
-                                    if verbose { os_log("⚠️ LibGit2: Failed to add/remove file: %{public}@ (error: %d), continuing...", file, result) }
+                                    if verbose { os_log("%{public}@⚠️ Failed to add/remove file: %{public}@ (error: %d), continuing...", self.t, file, result) }
                                 } else {
-                                    if verbose { os_log("🐚 LibGit2: Removed file: %{public}@", file) }
+                                    if verbose { os_log("%{public}@Removed file: %{public}@", self.t, file) }
                                 }
                             }
                         } else {
-                            if verbose { os_log("🐚 LibGit2: Added file: %{public}@", file) }
+                            if verbose { os_log("%{public}@Added file: %{public}@", self.t, file) }
                         }
                     }
                 }
