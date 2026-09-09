@@ -110,7 +110,7 @@ extension LibGit2 {
     public static func addAndCommit(files: [String], message: String, at path: String, verbose: Bool = true) throws -> String {
         return try LibGit2.serialized {
             if verbose { os_log("\(self.t)Adding and committing files: \(files)") }
-            try addFiles(files, at: path)
+            try addFiles(files, at: path, verbose: verbose)
             return try createCommit(message: message, at: path, verbose: verbose)
         }
     }
