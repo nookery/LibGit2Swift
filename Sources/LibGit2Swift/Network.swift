@@ -5,6 +5,51 @@ import OSLog
 
 // MARK: - Network Operations
 
+/// 克隆过程中 libgit2 报告的对象传输进度。
+public struct LibGit2CloneProgress: Equatable, Sendable {
+    public let totalObjects: Int
+    public let indexedObjects: Int
+    public let receivedObjects: Int
+    public let totalDeltas: Int
+    public let indexedDeltas: Int
+    public let receivedBytes: Int
+
+    /// 根据已接收对象数计算出的进度；远程尚未提供对象总数时为 nil。
+    public var fractionCompleted: Double? {
+        guard totalObjects > 0 else { return nil }
+        return min(max(Double(receivedObjects) / Double(totalObjects), 0), 1)
+    }
+
+    public init(
+        totalObjects: Int,
+        indexedObjects: Int,
+        receivedObjects: Int,
+        totalDeltas: Int,
+        indexedDeltas: Int,
+        receivedBytes: Int
+    ) {
+        self.totalObjects = totalObjects
+        self.indexedObjects = indexedObjects
+        self.receivedObjects = receivedObjects
+        self.totalDeltas = totalDeltas
+        self.indexedDeltas = indexedDeltas
+        self.receivedBytes = receivedBytes
+    }
+}
+
+private final class CloneProgressPayload: @unchecked Sendable {
+    let onProgress: (@Sendable (LibGit2CloneProgress) -> Void)?
+    let shouldCancel: (@Sendable () -> Bool)?
+
+    init(
+        onProgress: (@Sendable (LibGit2CloneProgress) -> Void)?,
+        shouldCancel: (@Sendable () -> Bool)?
+    ) {
+        self.onProgress = onProgress
+        self.shouldCancel = shouldCancel
+    }
+}
+
 /// 网络操作的 C 回调函数封装
 private struct NetworkCallbacks: SuperLog {
     public static let emoji = "🌐"
@@ -33,6 +78,26 @@ private struct NetworkCallbacks: SuperLog {
             os_log("\(Self.t) Transfer progress: \(String(format: "%.1f", percent))%")
         }
         return 0
+    }
+
+    /// 只用于 clone 的进度回调。fetch/pull 仍使用上面的 Bool payload，避免改变已有 ABI 约定。
+    static let cloneTransferProgress: @convention(c) (UnsafePointer<git_indexer_progress>?, UnsafeMutableRawPointer?) -> Int32 = { progress, payload in
+        guard let progress, let payload else { return 0 }
+
+        let progressPayload = Unmanaged<CloneProgressPayload>.fromOpaque(payload).takeUnretainedValue()
+        let value = progress.pointee
+        progressPayload.onProgress?(
+            LibGit2CloneProgress(
+                totalObjects: Int(value.total_objects),
+                indexedObjects: Int(value.indexed_objects),
+                receivedObjects: Int(value.received_objects),
+                totalDeltas: Int(value.total_deltas),
+                indexedDeltas: Int(value.indexed_deltas),
+                receivedBytes: Int(value.received_bytes)
+            )
+        )
+
+        return progressPayload.shouldCancel?() == true ? -1 : 0
     }
 }
 
@@ -547,7 +612,20 @@ extension LibGit2 {
     ///   - destination: 目标路径
     ///   - branch: 要克隆的分支（nil 表示默认分支）
     ///   - depth: 浅克隆深度（0 表示完整克隆）
-    public static func clone(url: String, to destination: String, branch: String? = nil, depth: Int = 0) throws {
+    ///   - onProgress: 接收 libgit2 报告的对象、delta 和字节数进度
+    ///   - shouldCancel: 返回 true 时中止传输并抛出 CancellationError
+    public static func clone(
+        url: String,
+        to destination: String,
+        branch: String? = nil,
+        depth: Int = 0,
+        onProgress: (@Sendable (LibGit2CloneProgress) -> Void)? = nil,
+        shouldCancel: (@Sendable () -> Bool)? = nil
+    ) throws {
+        if shouldCancel?() == true {
+            throw CancellationError()
+        }
+
         try LibGit2.serialized {
             os_log("\(t)Cloning repository from: \(url)")
 
@@ -563,17 +641,20 @@ extension LibGit2 {
             // or it might need to be set via fetch_opts.custom_headers or similar if supported.
             // For now removing it if it causes errors.
 
-            // 设置进度回调
-            cloneOpts.fetch_opts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
-            let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-            verbosePayloadPtr.pointee = true
-            defer { verbosePayloadPtr.deallocate() }
-            cloneOpts.fetch_opts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
+            // 设置 clone 专用进度回调。payload 必须在整个同步 git_clone 调用期间保持有效。
+            let progressPayload = CloneProgressPayload(onProgress: onProgress, shouldCancel: shouldCancel)
+            cloneOpts.fetch_opts.callbacks.transfer_progress = NetworkCallbacks.cloneTransferProgress
+            cloneOpts.fetch_opts.callbacks.payload = Unmanaged.passUnretained(progressPayload).toOpaque()
 
             var repo: OpaquePointer? = nil
-            let result = git_clone(&repo, url, destination, &cloneOpts)
+            let result = withExtendedLifetime(progressPayload) {
+                git_clone(&repo, url, destination, &cloneOpts)
+            }
 
             if result != 0 || repo == nil {
+                if shouldCancel?() == true {
+                    throw CancellationError()
+                }
                 if let error = git_error_last() {
                     let message = String(cString: error.pointee.message)
                     os_log("\(t)Clone failed: \(message)")

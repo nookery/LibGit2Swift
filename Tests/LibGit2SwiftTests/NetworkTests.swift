@@ -47,6 +47,34 @@ final class NetworkTests: LibGit2SwiftTestCase {
         try? FileManager.default.removeItem(atPath: clonePath)
     }
 
+    func testCloneCanBeCancelledBeforeStarting() throws {
+        let clonePath = testRepo.tempDirectory.appendingPathComponent("cancelled-clone").path
+
+        XCTAssertThrowsError(
+            try LibGit2.clone(
+                url: "/nonexistent/path",
+                to: clonePath,
+                shouldCancel: { true }
+            )
+        ) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
+    func testCloneProgressSnapshotCalculatesFraction() {
+        let progress = LibGit2CloneProgress(
+            totalObjects: 10,
+            indexedObjects: 4,
+            receivedObjects: 5,
+            totalDeltas: 3,
+            indexedDeltas: 1,
+            receivedBytes: 2048
+        )
+
+        XCTAssertEqual(progress.fractionCompleted, 0.5)
+        XCTAssertEqual(progress.receivedBytes, 2048)
+    }
+
     func testCloneInvalidURL() throws {
         // 尝试克隆无效URL应该失败
         let invalidURL = "/nonexistent/path/that/does/not/exist"
