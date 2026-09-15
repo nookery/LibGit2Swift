@@ -78,6 +78,30 @@ final class RepositoryTests: LibGit2SwiftTestCase {
         XCTAssertEqual(finalGitDir, finalExpected, "Git directory path should be correct")
     }
 
+    func testTrackedFilePathsReadsHEADTree() throws {
+        let nestedDirectory = testRepo.tempDirectory.appendingPathComponent("Sources")
+        try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+        try "let value = 1\n".write(
+            to: nestedDirectory.appendingPathComponent("App.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# README\n".write(
+            to: testRepo.tempDirectory.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try LibGit2.addFiles(["Sources/App.swift", "README.md"], at: testRepo.repositoryPath)
+        try LibGit2.setConfig(key: "user.name", value: "Test User", at: testRepo.repositoryPath, verbose: false)
+        try LibGit2.setConfig(key: "user.email", value: "test@example.com", at: testRepo.repositoryPath, verbose: false)
+        _ = try LibGit2.createCommit(message: "Add tracked files", at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertEqual(
+            Set(try LibGit2.getTrackedFilePaths(at: testRepo.repositoryPath)),
+            ["README.md", "Sources/App.swift"]
+        )
+    }
+
     // MARK: - HEAD Reference Tests
 
     func testGetHEADReference() throws {
