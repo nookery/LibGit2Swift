@@ -8,7 +8,7 @@ extension LibGit2 {
     /// 将 unified diff patch 应用到 index，等价于 `git apply --cached`。
     /// `mode == .unstage` 时会先反转 patch，再应用到 index。
     public static func applyPatch(_ patch: String, mode: GitPatchApplyMode, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let normalizedPatch = patch.hasSuffix("\n") ? patch : patch + "\n"
             let patchToApply = mode == .stage ? normalizedPatch : reverseUnifiedDiff(normalizedPatch)
 
@@ -42,7 +42,7 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更（false = 工作区变更）
     /// - Returns: 差异文件列表
     public static func getDiffFileList(at path: String, staged: Bool = false) throws -> [GitDiffFile] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -117,7 +117,7 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更
     /// - Returns: 差异内容字符串
     public static func getFileDiff(for file: String, at path: String, staged: Bool = false, ignoreWhitespace: Bool = false) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -248,7 +248,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 差异文件列表
     public static func getCommitDiffFiles(atCommit commitHash: String, at path: String) throws -> [GitDiffFile] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -321,7 +321,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 差异内容字符串
     public static func getDiffBetweenCommits(from: String, to: String, at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -397,7 +397,7 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件内容字符串
     public static func getFileContent(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let data = try getFileData(atCommit: commitHash, file: filePath, at: repoPath)
             guard let content = String(data: data, encoding: .utf8) else {
                 throw LibGit2Error.invalidValue
@@ -414,7 +414,7 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 文件的原始二进制数据
     public static func getFileData(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> Data {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let repo = try openRepository(at: repoPath)
             defer { git_repository_free(repo) }
 
@@ -468,7 +468,7 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 元组 (before: 修改前的内容, after: 修改后的内容)
     public static func getFileContentChange(atCommit commitHash: String, file filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let repo = try openRepository(at: repoPath)
             defer { git_repository_free(repo) }
 
@@ -532,7 +532,7 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: 元组 (before: HEAD中的内容, after: 工作区中的内容)
     public static func getUncommittedFileContentChange(for filePath: String, at repoPath: String) throws -> (before: String?, after: String?) {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let repo = try openRepository(at: repoPath)
             defer { git_repository_free(repo) }
 
@@ -578,7 +578,7 @@ extension LibGit2 {
     ///   - repoPath: 仓库路径
     /// - Returns: git diff 格式的字符串
     public static func getFileDiff(atCommit commitHash: String, for filePath: String, at repoPath: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let repo = try openRepository(at: repoPath)
             defer { git_repository_free(repo) }
 

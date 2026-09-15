@@ -4,7 +4,7 @@ import Foundation
 extension LibGit2 {
     /// 列出仓库级别的所有配置项。
     public static func listConfig(at path: String) throws -> [(key: String, value: String)] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

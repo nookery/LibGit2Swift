@@ -10,7 +10,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func merge(branchName: String, at path: String, verbose: Bool) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Merging branch: \(branchName)") }
 
             let repo = try openRepository(at: path)
@@ -189,7 +189,7 @@ extension LibGit2 {
     /// 中止合并
     /// - Parameter path: 仓库路径
     public static func abortMerge(at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Aborting merge") }
 
             let repo = try openRepository(at: path)
@@ -219,7 +219,7 @@ extension LibGit2 {
     ///   - branchName: 分支名称
     ///   - path: 仓库路径
     public static func continueMerge(branchName: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Continuing merge") }
 
             if try hasMergeConflicts(at: path) {

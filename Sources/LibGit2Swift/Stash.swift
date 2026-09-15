@@ -40,7 +40,7 @@ public struct GitStashEntry: Identifiable, Equatable, Hashable, Sendable {
 extension LibGit2 {
     /// 获取增强的暂存列表（包含日期、文件数、diff 预览）。
     public static func getStashListEnhanced(at path: String) throws -> [GitStashEntry] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -86,7 +86,7 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 暂存索引
     public static func stash(message: String? = nil, at path: String, verbose: Bool = true) throws -> Int {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Stashing changes") }
 
             let repo = try openRepository(at: path)
@@ -127,7 +127,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashPop(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Popping stash at index: %d", index) }
 
             let repo = try openRepository(at: path)
@@ -152,7 +152,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashApply(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Applying stash at index: %d", index) }
 
             let repo = try openRepository(at: path)
@@ -177,7 +177,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存信息列表
     public static func getStashList(at path: String) throws -> [(index: Int, message: String, commitHash: String)] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let enhanced = try getStashListEnhanced(at: path)
             return enhanced.map { ($0.index, $0.message, $0.commitHash) }
         }
@@ -189,7 +189,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashDrop(index: Int = 0, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Dropping stash at index: %d", index) }
 
             let repo = try openRepository(at: path)
@@ -207,7 +207,7 @@ extension LibGit2 {
 
     /// Create a branch at the stash base commit, check it out, apply the stash, then drop it.
     public static func stashBranch(name branchName: String, index: Int, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmedName.isEmpty == false else {
                 throw LibGit2Error.invalidReference
@@ -255,7 +255,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func stashClear(at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Clearing all stashes") }
 
             let repo = try openRepository(at: path)
@@ -276,7 +276,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 暂存数量
     public static func getStashCount(at path: String) throws -> Int {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let stashes = try getStashList(at: path)
             return stashes.count
         }
@@ -286,7 +286,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 如果有暂存返回 true
     public static func hasStash(at path: String) throws -> Bool {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             return try getStashCount(at: path) > 0
         }
     }

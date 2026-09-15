@@ -26,7 +26,7 @@ extension LibGit2 {
     ///   - skip: 跳过的提交数量
     /// - Returns: 提交列表
     public static func getCommitList(at path: String, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             try getCommitList(at: path, scope: .head, limit: limit, skip: skip)
         }
     }
@@ -36,14 +36,14 @@ extension LibGit2 {
     /// 返回结果按拓扑优先、时间倒序遍历，并包含本地分支、远程分支和标签引用。
     /// GitOK 可基于 `parentHashes` 和 `refs` 在 UI 层计算 lane 与绘制连线。
     public static func getCommitGraphList(at path: String, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             try getCommitList(at: path, scope: .allReferences, limit: limit, skip: skip)
         }
     }
 
     /// 分页获取用于提交拓扑图的提交列表。
     public static func getCommitGraphListWithPagination(at path: String, page: Int, size: Int) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             try getCommitGraphList(at: path, limit: size, skip: page * size)
         }
     }
@@ -56,7 +56,7 @@ extension LibGit2 {
     ///   - skip: 跳过的提交数量
     /// - Returns: 提交列表
     public static func getCommitList(at path: String, scope: CommitTraversalScope, limit: Int = Int.max, skip: Int = 0) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -125,7 +125,7 @@ extension LibGit2 {
     ///   - size: 每页大小
     /// - Returns: 提交列表
     public static func getCommitListWithPagination(at path: String, page: Int, size: Int) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             return try getCommitList(at: path, limit: size, skip: page * size)
         }
     }
@@ -137,7 +137,7 @@ extension LibGit2 {
     ///   - limit: 最大返回数量
     /// - Returns: 提交列表
     public static func getCommitList(on branch: String, at path: String, limit: Int = Int.max) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -252,7 +252,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 提交详细信息
     public static func getCommitDetail(commitHash: String, at path: String) throws -> GitCommit? {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

@@ -10,7 +10,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func checkout(branch: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Checking out branch: %{public}@", branch) }
 
             let repo = try openRepository(at: path)
@@ -74,7 +74,7 @@ extension LibGit2 {
     ///   - branchName: 新分支名称
     ///   - path: 仓库路径
     public static func checkoutNewBranch(named branchName: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Creating and checking out new branch: %{public}@", branchName) }
 
             // 首先创建分支
@@ -90,7 +90,7 @@ extension LibGit2 {
     ///   - filePath: 文件路径
     ///   - path: 仓库路径
     public static func checkoutFile(_ filePath: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Checking out file: %{public}@", filePath) }
 
             let repo = try openRepository(at: path)
@@ -161,7 +161,7 @@ extension LibGit2 {
     ///   - filePaths: 文件路径数组
     ///   - path: 仓库路径
     public static func checkoutFiles(_ filePaths: [String], at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             for filePath in filePaths {
                 try checkoutFile(filePath, at: path)
             }
@@ -171,7 +171,7 @@ extension LibGit2 {
     /// 检出所有文件（丢弃所有变更）
     /// - Parameter path: 仓库路径
     public static func checkoutAllFiles(at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Checking out all files") }
 
             let repo = try openRepository(at: path)
@@ -218,7 +218,7 @@ extension LibGit2 {
     ///   - commitHash: 提交哈希
     ///   - path: 仓库路径
     public static func checkoutCommit(_ commitHash: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Checking out commit: %{public}@", commitHash) }
 
             let repo = try openRepository(at: path)

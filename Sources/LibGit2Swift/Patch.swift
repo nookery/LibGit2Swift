@@ -42,7 +42,7 @@ extension LibGit2 {
     ///   - staged: 是否获取已暂存的变更（true = index vs HEAD，false = workdir vs index）
     /// - Returns: 按行号排序的 hunk 列表
     public static func getDiffHunks(for filePath: String, at path: String, staged: Bool = false) throws -> [GitDiffHunk] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -149,7 +149,7 @@ extension LibGit2 {
     ///   - mode: 应用到暂存区还是从暂存区移除
     ///   - path: 仓库路径
     public static func applyHunk(_ hunk: String, mode: GitPatchApplyMode, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             // 确保 hunk 以换行结尾
             let normalizedHunk = hunk.hasSuffix("\n") ? hunk : hunk + "\n"
             let patchToApply = mode == .stage ? normalizedHunk : reversePatch(normalizedHunk)

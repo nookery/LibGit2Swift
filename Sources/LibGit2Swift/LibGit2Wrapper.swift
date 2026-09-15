@@ -12,19 +12,16 @@ public class LibGit2: SuperLog {
 
     // MARK: - 访问串行化
 
-    /// 所有 libgit2 C 层调用的串行访问队列。
+    /// 所有 libgit2 C 层调用经由的仓库级执行队列池。
     ///
     /// libgit2 即便以 GIT_THREADS 构建，也只保证"不同对象可在不同线程使用"，
     /// 对同一仓库的并发操作存在已知竞态，曾导致宿主 App 因内存破坏随机崩溃
     /// （EXC_BREAKPOINT / pthread_self PAC 校验失败，破坏数据中出现 libgit2 全局
-    /// 符号）。因此在库内部强制：任何线程进入公开 API 都必须经由此队列串行执行。
-    private static let accessQueue: DispatchQueue = {
-        let queue = DispatchQueue(label: "com.coffic.libgit2.access", qos: .userInitiated)
-        queue.setSpecific(key: queueSpecificKey, value: ())
-        return queue
-    }()
-
-    private static let queueSpecificKey = DispatchSpecificKey<Void>()
+    /// 符号）。因此库内部强制：任何线程进入公开 API 都必须经由执行队列串行执行。
+    ///
+    /// 串行粒度是**单个仓库**而非整个进程：同一仓库串行以保证竞态安全，
+    /// 不同仓库并行以避免慢仓库阻塞其他仓库的 Git 操作。
+    private static let queuePool = LibGit2QueuePool.shared
 
     /// 首次进入任何 API 前确保 C 层完成初始化（恰好一次）。
     ///
@@ -42,16 +39,27 @@ public class LibGit2: SuperLog {
         git_libgit2_init()
     }()
 
-    /// 在串行访问队列上执行 `body`。
+    /// 在**指定仓库**的执行队列上执行 `body`。
     ///
-    /// 已处于访问队列上的调用（公开方法之间互相调用）直接执行，避免串行队列
-    /// `sync` 嵌套造成死锁。
+    /// 同一仓库串行执行以保证 libgit2 竞态安全；不同仓库并行执行，避免慢仓库
+    /// 阻塞其他仓库的 Git 操作。库内部公开方法之间互相调用（如 `pull` 调用
+    /// `hasUncommittedChanges`）会命中队列池的重入检测，直接执行而不会死锁。
+    ///
+    /// - Parameter repositoryPath: 操作目标仓库路径。这是**必须**显式提供的：
+    ///   省略会使并发保护退化为进程级，正是需要消除的行为。
+    static func serialized<T>(at repositoryPath: String, _ body: () throws -> T) rethrows -> T {
+        _ = cLayerInitialized
+        return try queuePool.sync(repositoryPath: repositoryPath, body)
+    }
+
+    /// 在**全局执行队列**上执行 `body`，用于无单一仓库语义的操作。
+    ///
+    /// 仅限生命周期（`initialize` / `shutdown`）、版本查询、全局配置与纯工具
+    /// 函数（如 `oidToString`）使用。任何以单个仓库为目标的操作都必须改用
+    /// `serialized(at:)`，否则会重新引入"一个慢仓库阻塞全部仓库"的问题。
     static func serialized<T>(_ body: () throws -> T) rethrows -> T {
         _ = cLayerInitialized
-        if DispatchQueue.getSpecific(key: queueSpecificKey) != nil {
-            return try body()
-        }
-        return try accessQueue.sync(execute: body)
+        return try queuePool.sync(repositoryPath: nil, body)
     }
 
 
@@ -135,7 +143,7 @@ public class LibGit2: SuperLog {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 配置值
     public static func getConfig(key: String, at repoPath: String, verbose: Bool) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             if verbose { os_log("\(t)Getting config for key: \(key) at path: \(repoPath)") }
 
             var repo: OpaquePointer?
@@ -186,7 +194,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func setConfig(key: String, value: String, at repoPath: String, verbose: Bool) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: repoPath) {
             if verbose { os_log("\(LibGit2.t)Setting config for key: \(key) at path: \(repoPath)") }
 
             let repo = try openRepository(at: repoPath)
@@ -225,7 +233,7 @@ public class LibGit2: SuperLog {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: (用户名, 邮箱)元组
     public static func getUserConfig(at repoPath: String, verbose: Bool) throws -> (name: String, email: String) {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             let name = try getConfig(key: "user.name", at: repoPath, verbose: verbose)
             let email = try getConfig(key: "user.email", at: repoPath, verbose: verbose)
             return (name, email)
@@ -257,7 +265,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func setUserConfig(name: String, email: String, at repoPath: String, verbose: Bool) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: repoPath) {
             try setConfig(key: "user.name", value: name, at: repoPath, verbose: verbose)
             try setConfig(key: "user.email", value: email, at: repoPath, verbose: verbose)
         }
@@ -269,7 +277,7 @@ public class LibGit2: SuperLog {
     ///   - verbose: 是否输出详细日志
     /// - Returns: 用户名
     public static func getUserName(at repoPath: String, verbose: Bool) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             return try getConfig(key: "user.name", at: repoPath, verbose: verbose)
         }
     }
@@ -280,7 +288,7 @@ public class LibGit2: SuperLog {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 用户邮箱
     public static func getUserEmail(at repoPath: String, verbose: Bool = true) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: repoPath) {
             return try getConfig(key: "user.email", at: repoPath, verbose: verbose)
         }
     }
@@ -291,7 +299,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func setUserName(name: String, at repoPath: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: repoPath) {
             try setConfig(key: "user.name", value: name, at: repoPath, verbose: verbose)
         }
     }
@@ -302,7 +310,7 @@ public class LibGit2: SuperLog {
     ///   - repoPath: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func setUserEmail(email: String, at repoPath: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: repoPath) {
             try setConfig(key: "user.email", value: email, at: repoPath, verbose: verbose)
         }
     }
@@ -321,7 +329,7 @@ public class LibGit2: SuperLog {
 
     /// 打开仓库
     public static func openRepository(at path: String) throws -> OpaquePointer {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             var repo: OpaquePointer?
             let result = git_repository_open(&repo, path)
 
@@ -357,13 +365,19 @@ public enum LibGit2Error: Error, LocalizedError {
     case remoteNotFound(String)
     case pushFailed(String) // 修改：携带详细错误消息
     case pullFailed(String) // 修改：携带详细错误消息
-    case cloneFailed
+    case cloneFailed(message: String?)
     case mergeConflict
     case invalidRepository
     case invalidReference
     case networkError(Int)
     case authenticationError
     case localChangesWouldBeOverwritten(message: String)
+    /// 当前仓库未设置 upstream（`branch.<name>.remote` / `branch.<name>.merge`）。
+    case noUpstreamConfigured(branch: String)
+    /// upstream 指向的远程引用在本地不存在（通常因为尚未 fetch）。
+    case upstreamReferenceNotFound(String)
+    /// 操作前提不满足（例如仓库正处于 merge / rebase 中途）。
+    case invalidRepositoryState(String)
 
     public var errorDescription: String? {
         switch self {
@@ -399,8 +413,8 @@ public enum LibGit2Error: Error, LocalizedError {
             return message // 修改：使用详细错误消息
         case let .pullFailed(message):
             return message // 修改：使用详细错误消息
-        case .cloneFailed:
-            return "Failed to clone repository"
+        case let .cloneFailed(message):
+            return message ?? "Failed to clone repository"
         case .mergeConflict:
             return "Merge conflict detected"
         case .invalidRepository:
@@ -412,6 +426,12 @@ public enum LibGit2Error: Error, LocalizedError {
         case .authenticationError:
             return "Authentication failed"
         case let .localChangesWouldBeOverwritten(message):
+            return message
+        case let .noUpstreamConfigured(branch):
+            return "Branch '\(branch)' has no upstream configured."
+        case let .upstreamReferenceNotFound(reference):
+            return "Upstream reference not found: \(reference). Try fetching first."
+        case let .invalidRepositoryState(message):
             return message
         }
     }
@@ -426,6 +446,8 @@ public enum LibGit2Error: Error, LocalizedError {
             return "Please resolve conflicts before continuing"
         case .localChangesWouldBeOverwritten:
             return "Commit or stash your changes before continuing"
+        case .noUpstreamConfigured:
+            return "Publish the branch or set an upstream before pushing or pulling"
         default:
             return nil
         }

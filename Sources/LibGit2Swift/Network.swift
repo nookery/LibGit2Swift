@@ -39,14 +39,14 @@ public struct LibGit2CloneProgress: Equatable, Sendable {
 
 private final class CloneProgressPayload: @unchecked Sendable {
     let onProgress: (@Sendable (LibGit2CloneProgress) -> Void)?
-    let shouldCancel: (@Sendable () -> Bool)?
+    let cancellation: GitCancellationToken?
 
     init(
         onProgress: (@Sendable (LibGit2CloneProgress) -> Void)?,
-        shouldCancel: (@Sendable () -> Bool)?
+        cancellation: GitCancellationToken?
     ) {
         self.onProgress = onProgress
-        self.shouldCancel = shouldCancel
+        self.cancellation = cancellation
     }
 }
 
@@ -97,7 +97,7 @@ private struct NetworkCallbacks: SuperLog {
             )
         )
 
-        return progressPayload.shouldCancel?() == true ? -1 : 0
+        return progressPayload.cancellation?.isCancelled == true ? -1 : 0
     }
 }
 
@@ -187,19 +187,45 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - remote: 远程仓库名称（默认 "origin"）
     ///   - branch: 分支名称（nil 表示使用当前分支）
-    public static func push(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
-        try LibGit2.serialized {
-            // 获取当前分支名
-            let branchName: String
-            if let branch = branch {
-                branchName = branch
-            } else {
-                branchName = try getCurrentBranch(at: path)
+    /// 推送当前分支到其 upstream。
+    ///
+    /// 依据 `branch.<name>.remote` / `branch.<name>.merge` 决定推送目标，
+    /// 而非假定远程分支名与本地分支名相同。未设置 upstream 时抛出
+    /// `noUpstreamConfigured`，与 `git push` 在无 upstream 时的行为一致
+    /// （提示用户先 publish 或设置 upstream）。
+    ///
+    /// - Parameters:
+    ///   - path: 仓库路径
+    ///   - verbose: 是否输出详细日志
+    public static func push(at path: String, verbose: Bool = true) throws {
+        try LibGit2.serialized(at: path) {
+            guard let binding = try upstreamBinding(at: path) else {
+                let branch = (try? currentBranchName(at: path)) ?? "HEAD"
+                throw LibGit2Error.noUpstreamConfigured(branch: branch ?? "HEAD")
             }
+            // 推送到 upstream 指向的远程分支：
+            //   refs/heads/<local> -> refs/heads/<remoteBranch>
+            try pushRefspecs([binding.pushRefspec], at: path, remote: binding.remote, verbose: verbose)
+        }
+    }
 
-            // 构建 refspec
-            let refspec = "refs/heads/\(branchName):refs/heads/\(branchName)"
-            try pushRefspecs([refspec], at: path, remote: remote, verbose: verbose)
+    /// 推送指定本地分支到指定远程的指定分支（显式指定，不读 upstream）。
+    public static func push(
+        localBranch: String,
+        to remote: String,
+        remoteBranch: String,
+        at path: String,
+        verbose: Bool = true
+    ) throws {
+        try LibGit2.serialized(at: path) {
+            let local = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+            let remoteName = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+            let destination = remoteBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !local.isEmpty, !remoteName.isEmpty, !destination.isEmpty else {
+                throw LibGit2Error.invalidReference
+            }
+            let refspec = "refs/heads/\(local):refs/heads/\(destination)"
+            try pushRefspecs([refspec], at: path, remote: remoteName, verbose: verbose)
         }
     }
 
@@ -212,7 +238,7 @@ extension LibGit2 {
         setUpstream: Bool = true,
         verbose: Bool = true
     ) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedRemoteBranch = remoteBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -234,7 +260,7 @@ extension LibGit2 {
 
     /// 删除远程分支，等价于 `git push <remote> --delete <branch>`。
     public static func deleteRemoteBranch(named branchName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -256,7 +282,7 @@ extension LibGit2 {
 
     /// 推送本地标签到远程。
     public static func pushTag(named tagName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -270,7 +296,7 @@ extension LibGit2 {
 
     /// 删除远程标签。
     public static func deleteRemoteTag(named tagName: String, remote: String = "origin", at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedRemote = remote.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -284,7 +310,7 @@ extension LibGit2 {
 
     /// 使用指定 refspec 推送到远程仓库。
     public static func pushRefspecs(_ refspecs: [String], at path: String, remote: String = "origin", verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             NetworkCallbacks.verbose = verbose
             if NetworkCallbacks.verbose { os_log("\(t)Pushing to remote: \(remote)") }
 
@@ -373,199 +399,329 @@ extension LibGit2 {
         }
     }
 
-    /// 从远程仓库拉取
+    /// 从 upstream 拉取并合并到当前分支。
+    ///
+    /// upstream 由 `branch.<name>.remote` / `branch.<name>.merge` 决定，
+    /// 不再假定远程分支名与本地分支名相同。
+    ///
+    /// **安全性**：合并或快进前会检查工作区。若存在会与传入更新冲突的本地
+    /// 改动，则抛出 `localChangesWouldBeOverwritten`，绝不静默丢弃用户改动
+    /// （旧实现使用 `GIT_CHECKOUT_FORCE`，这是数据丢失级缺陷）。
+    ///
     /// - Parameters:
     ///   - path: 仓库路径
-    ///   - remote: 远程仓库名称（默认 "origin"）
-    ///   - branch: 分支名称（nil 表示使用当前分支）
-    public static func pull(at path: String, remote: String = "origin", branch: String? = nil, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+    ///   - strategy: 拉取策略（merge / fast-forward-only / rebase）
+    ///   - verbose: 是否输出详细日志
+    public static func pull(
+        at path: String,
+        strategy: PullStrategy = .merge,
+        verbose: Bool = true
+    ) throws {
+        try LibGit2.serialized(at: path) {
             NetworkCallbacks.verbose = verbose
-            if NetworkCallbacks.verbose { os_log("\(t)Pulling from remote: \(remote)") }
 
-            let repo = try openRepository(at: path)
+            guard let binding = try upstreamBinding(at: path) else {
+                let branch = (try? currentBranchName(at: path)) ?? nil
+                throw LibGit2Error.noUpstreamConfigured(branch: branch ?? "HEAD")
+            }
+
+            if NetworkCallbacks.verbose {
+                os_log("\(t)Pulling \(binding.localBranch) from \(binding.remote)/\(binding.remoteBranch)")
+            }
+
+            let repo = try openRepositoryUnlocked(at: path)
             defer { git_repository_free(repo) }
 
-            var remoteObj: OpaquePointer? = nil
+            var remoteObj: OpaquePointer?
             defer { if remoteObj != nil { git_remote_free(remoteObj) } }
-
-            let result = git_remote_lookup(&remoteObj, repo, remote)
-
-            if result != 0 {
-                throw LibGit2Error.remoteNotFound(remote)
+            guard git_remote_lookup(&remoteObj, repo, binding.remote) == 0, let remotePtr = remoteObj else {
+                throw LibGit2Error.remoteNotFound(binding.remote)
             }
 
-            guard let remotePtr = remoteObj else {
-                throw LibGit2Error.remoteNotFound(remote)
-            }
+            try fetchIntoRemoteTracking(
+                repo: repo,
+                remote: remotePtr,
+                refspec: binding.fetchRefspec,
+                verbose: verbose
+            )
 
-            // 获取当前分支名
-            let branchName: String
-            if let branch = branch {
-                branchName = branch
-            } else {
-                branchName = try getCurrentBranch(at: path)
-            }
-
-            // 设置 fetch refspecs
-            let refspec = "refs/heads/\(branchName):refs/remotes/\(remote)/\(branchName)"
-
-            var fetchOpts = git_fetch_options()
-            git_fetch_init_options(&fetchOpts, UInt32(GIT_FETCH_OPTIONS_VERSION))
-
-            // 设置凭据回调
-            fetchOpts.callbacks.credentials = gitCredentialCallback
-
-            // 设置进度回调
-            fetchOpts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
-            let verbosePayloadPtr = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-            verbosePayloadPtr.pointee = verbose
-            defer { verbosePayloadPtr.deallocate() }
-            fetchOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayloadPtr)
-
-            // 执行 fetch
-            let refspecPtr = strdup(refspec)
-            defer { free(refspecPtr) }
-
-            var refspecs = git_strarray()
-            var refspecArray: [UnsafeMutablePointer<CChar>?] = [refspecPtr]
-            let fetchResult = refspecArray.withUnsafeMutableBufferPointer { buffer -> Int32 in
-                refspecs.strings = buffer.baseAddress
-                refspecs.count = 1
-                return git_remote_fetch(remotePtr, &refspecs, &fetchOpts, nil)
-            }
-
-            if fetchResult != 0 {
-                var errorMessage = "Unknown fetch error"
-
-                if let error = git_error_last() {
-                    let message = String(cString: error.pointee.message)
-                    if !message.isEmpty {
-                        errorMessage = message
-                    }
-                }
-
-                if NetworkCallbacks.verbose { os_log("\(t)Fetch failed with code \(fetchResult): \(errorMessage)") }
-
-                // 检查是否是认证错误
-                if isAuthenticationError(fetchResult, errorMessage: errorMessage) {
-                    throw LibGit2Error.authenticationError
-                }
-
-                // 检查是否是网络/SSL 错误
-                if isNetworkError(fetchResult, errorMessage: errorMessage) {
-                    throw LibGit2Error.networkError(Int(fetchResult))
-                }
-
-                throw LibGit2Error.pullFailed(errorMessage)
-            }
-
-            // 获取远程分支的 commit
-            let remoteBranchRef = "refs/remotes/\(remote)/\(branchName)"
+            // 解析 upstream 引用到具体 commit。必须显式检查：不在时通常意味着
+            // 该远程分支从未被 fetch 过，而非"已是最新"。
             var remoteOID = git_oid()
-
-            if git_reference_name_to_id(&remoteOID, repo, remoteBranchRef) != 0 {
-                throw LibGit2Error.pullFailed("Failed to get remote branch reference")
+            guard git_reference_name_to_id(&remoteOID, repo, binding.remoteTrackingReference) == 0 else {
+                throw LibGit2Error.upstreamReferenceNotFound(binding.remoteTrackingReference)
             }
 
-            var remoteAnnotatedCommit: OpaquePointer? = nil
-            defer { if remoteAnnotatedCommit != nil { git_annotated_commit_free(remoteAnnotatedCommit) } }
-
-            if git_annotated_commit_lookup(&remoteAnnotatedCommit, repo, &remoteOID) != 0 {
-                throw LibGit2Error.pullFailed("Failed to lookup annotated commit")
+            var remoteAnnotated: OpaquePointer?
+            defer { if remoteAnnotated != nil { git_annotated_commit_free(remoteAnnotated) } }
+            guard git_annotated_commit_lookup(&remoteAnnotated, repo, &remoteOID) == 0,
+                  let remoteCommit = remoteAnnotated else {
+                throw LibGit2Error.pullFailed("Failed to resolve upstream commit.")
             }
 
-            // 分析合并
-            var analysis = git_merge_analysis_t.init(0)
-            var preference = git_merge_preference_t.init(0)
+            // 合并分析：libgit2 以 HEAD 隐含本地侧，只需传入 upstream。
+            var analysis = git_merge_analysis_t(rawValue: 0)
+            var preference = git_merge_preference_t(rawValue: 0)
+            var analysisCommits: [OpaquePointer?] = [remoteCommit]
+            analysisCommits.withUnsafeMutableBufferPointer { buffer in
+                git_merge_analysis(&analysis, &preference, repo, buffer.baseAddress, 1)
+            }
 
-            let headCommit = try getHEAD(at: path)
-            let headRef = "refs/heads/\(headCommit)"
-
-            var headOID = git_oid()
-            git_reference_name_to_id(&headOID, repo, headRef)
-
-            var headAnnotatedCommit: OpaquePointer? = nil
-            defer { if headAnnotatedCommit != nil { git_annotated_commit_free(headAnnotatedCommit) } }
-
-            git_annotated_commit_lookup(&headAnnotatedCommit, repo, &headOID)
-
-            git_merge_analysis(&analysis, &preference, repo, &remoteAnnotatedCommit, 1)
-
-            // 执行合并
             if analysis.rawValue & GIT_MERGE_ANALYSIS_UP_TO_DATE.rawValue != 0 {
                 if NetworkCallbacks.verbose { os_log("\(t)Already up to date") }
                 return
             }
 
-            if analysis.rawValue & GIT_MERGE_ANALYSIS_FASTFORWARD.rawValue != 0 {
-                let hasLocalChanges = try hasUncommittedChanges(at: path, verbose: false)
+            let canFastForward = analysis.rawValue & GIT_MERGE_ANALYSIS_FASTFORWARD.rawValue != 0
 
-                if hasLocalChanges {
-                    var mergeOpts = git_merge_options()
-                    git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
-
-                    var checkoutOpts = makeSafeCheckoutOptions()
-                    let mergeResult = git_merge(repo, &remoteAnnotatedCommit, 1, &mergeOpts, &checkoutOpts)
-                    if mergeResult != 0 {
-                        throw errorFromCheckoutResult(mergeResult, context: "pull")
-                    }
-                    git_repository_state_cleanup(repo)
-                } else {
-                    var reference: OpaquePointer? = nil
-                    defer { if reference != nil { git_reference_free(reference) } }
-
-                    guard git_reference_lookup(&reference, repo, headRef) == 0, let reference else {
-                        throw LibGit2Error.pullFailed("Failed to lookup branch reference for fast-forward")
-                    }
-
-                    var updatedRef: OpaquePointer? = nil
-                    let setTargetResult = git_reference_set_target(
-                        &updatedRef,
-                        reference,
-                        &remoteOID,
-                        "pull: fast-forward"
+            if canFastForward {
+                if strategy == .fastForwardOnly || strategy == .merge || strategy == .rebase {
+                    try fastForward(
+                        repo: repo,
+                        localReference: binding.localReference,
+                        targetOID: remoteOID
                     )
-                    git_reference_free(updatedRef)
-                    if setTargetResult != 0 {
-                        throw LibGit2Error.pullFailed("Failed to fast-forward branch reference")
-                    }
-
-                    var checkoutOpts = git_checkout_options()
-                    git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-                    checkoutOpts.checkout_strategy = GIT_CHECKOUT_FORCE.rawValue |
-                        GIT_CHECKOUT_RECREATE_MISSING.rawValue
-                    let checkoutResult = git_checkout_head(repo, &checkoutOpts)
-                    if checkoutResult != 0 {
-                        throw LibGit2Error.pullFailed("Failed to update working tree after fast-forward")
-                    }
+                    os_log("\(t)Pull completed (fast-forward)")
+                    return
                 }
-            } else if analysis.rawValue & GIT_MERGE_ANALYSIS_NORMAL.rawValue != 0 {
-                // 需要普通合并
-                var mergeOpts = git_merge_options()
-                git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
-
-                var checkoutOpts = git_checkout_options()
-                git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
-                checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
-
-                let mergeResult = git_merge(repo, &remoteAnnotatedCommit, 1, &mergeOpts, &checkoutOpts)
-
-                if mergeResult != 0 {
-                    throw LibGit2Error.mergeConflict
-                }
-
-                // 创建合并提交
-                // 这里简化处理，实际应用中可能需要更复杂的逻辑
             }
 
-            os_log("\(t)Pull completed successfully")
+            guard strategy != .fastForwardOnly else {
+                throw LibGit2Error.pullFailed("Not a fast-forward update; refusing to merge.")
+            }
+
+            if strategy == .rebase {
+                throw LibGit2Error.pullFailed(
+                    "Rebase strategy requires the rebase API; use .merge or .fastForwardOnly."
+                )
+            }
+
+            // 普通合并：先做安全检查，禁止覆盖未提交改动。
+            try mergeUpstream(repo: repo, upstreamCommit: remoteCommit)
+            if NetworkCallbacks.verbose {
+                os_log("\(t)Pull completed (merge)")
+            }
         }
     }
 
+    /// 拉取策略。
+    public enum PullStrategy: String, Sendable, CaseIterable {
+        /// 允许快进，否则创建合并提交（等价 `git pull` 默认行为）。
+        case merge
+        /// 仅允许快进，否则失败（等价 `git pull --ff-only`）。
+        case fastForwardOnly
+        /// 变基后快进（等价 `git pull --rebase`）。
+        case rebase
+    }
+
+    // MARK: - Pull 内部步骤
+
+    /// 执行 fetch，把 upstream 更新写入远程跟踪引用。
+    private static func fetchIntoRemoteTracking(
+        repo: OpaquePointer,
+        remote: OpaquePointer,
+        refspec: String,
+        verbose: Bool
+    ) throws {
+        var fetchOpts = git_fetch_options()
+        git_fetch_init_options(&fetchOpts, UInt32(GIT_FETCH_OPTIONS_VERSION))
+        fetchOpts.callbacks.credentials = gitCredentialCallback
+        fetchOpts.callbacks.transfer_progress = NetworkCallbacks.transferProgress
+
+        let verbosePayload = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        verbosePayload.pointee = verbose
+        defer { verbosePayload.deallocate() }
+        fetchOpts.callbacks.payload = UnsafeMutableRawPointer(verbosePayload)
+
+        let refspecPointer = strdup(refspec)
+        defer { free(refspecPointer) }
+
+        var refspecs = git_strarray()
+        var refspecArray: [UnsafeMutablePointer<CChar>?] = [refspecPointer]
+        let result = refspecArray.withUnsafeMutableBufferPointer { buffer -> Int32 in
+            refspecs.strings = buffer.baseAddress
+            refspecs.count = 1
+            return git_remote_fetch(remote, &refspecs, &fetchOpts, nil)
+        }
+
+        guard result == 0 else {
+            throw networkError(from: result, context: "Fetch failed")
+        }
+    }
+
+    /// 快进本地分支引用并安全更新工作区。
+    private static func fastForward(
+        repo: OpaquePointer,
+        localReference: String,
+        targetOID: git_oid
+    ) throws {
+        // 先用 SAFE 策略更新工作区：若存在冲突的本地改动会直接失败，
+        // 而不是像 GIT_CHECKOUT_FORCE 那样覆盖用户文件。
+        var checkoutOpts = git_checkout_options()
+        git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+
+        var targetOID = targetOID
+        var targetObject: OpaquePointer?
+        defer { if targetObject != nil { git_object_free(targetObject) } }
+        guard git_object_lookup(&targetObject, repo, &targetOID, GIT_OBJECT_COMMIT) == 0,
+              let tree = targetObject else {
+            throw LibGit2Error.pullFailed("Failed to resolve fast-forward target tree.")
+        }
+        let checkoutResult = git_checkout_tree(repo, tree, &checkoutOpts)
+        if checkoutResult != 0 {
+            throw errorFromCheckoutResult(checkoutResult, context: "pull")
+        }
+
+        // 工作区已安全更新，再移动分支引用。
+        var reference: OpaquePointer?
+        defer { if reference != nil { git_reference_free(reference) } }
+        guard git_reference_lookup(&reference, repo, localReference) == 0, let reference else {
+            throw LibGit2Error.pullFailed("Failed to lookup branch reference for fast-forward.")
+        }
+
+        var updatedRef: OpaquePointer?
+        defer { if updatedRef != nil { git_reference_free(updatedRef) } }
+        let setTargetResult = git_reference_set_target(
+            &updatedRef,
+            reference,
+            &targetOID,
+            "pull: fast-forward"
+        )
+        guard setTargetResult == 0 else {
+            throw LibGit2Error.pullFailed("Failed to fast-forward branch reference.")
+        }
+    }
+
+    /// 执行一次普通合并，并在无法安全合并时回滚工作区。
+    ///
+    /// 返回 libgit2 的状态码；冲突（`GIT_ECONFLICT`）不是错误，而是需要用户
+    /// 介入的正常状态，因此不抛出，交由上层 UI 展示冲突解决界面。
+    private static func mergeUpstream(
+        repo: OpaquePointer,
+        upstreamCommit: OpaquePointer
+    ) throws {
+        var mergeOpts = git_merge_options()
+        git_merge_init_options(&mergeOpts, UInt32(GIT_MERGE_OPTIONS_VERSION))
+
+        var checkoutOpts = git_checkout_options()
+        git_checkout_init_options(&checkoutOpts, UInt32(GIT_CHECKOUT_OPTIONS_VERSION))
+        checkoutOpts.checkout_strategy = GIT_CHECKOUT_SAFE.rawValue
+
+        var upstreamCommits: [OpaquePointer?] = [upstreamCommit]
+        let mergeResult = upstreamCommits.withUnsafeMutableBufferPointer { buffer -> Int32 in
+            var mergeOpts = mergeOpts
+            var checkoutOpts = checkoutOpts
+            return git_merge(repo, buffer.baseAddress, 1, &mergeOpts, &checkoutOpts)
+        }
+
+        if mergeResult == GIT_ECONFLICT.rawValue {
+            // 留下 MERGE_HEAD 与冲突标记，交给用户解决。
+            throw LibGit2Error.mergeConflict
+        }
+
+        guard mergeResult == 0 else {
+            // 失败（例如本地改动会被覆盖）时清理中间状态并上抛可读错误。
+            git_repository_state_cleanup(repo)
+            throw errorFromCheckoutResult(mergeResult, context: "pull")
+        }
+
+        // 合并成功则创建合并提交，使 HEAD 前移（与 git pull 一致）。
+        try commitMerge(repo: repo)
+    }
+
+    /// 为已完成的合并创建合并提交。
+    private static func commitMerge(repo: OpaquePointer) throws {
+        // 无冲突且索引已就绪，直接提交。
+        var index: OpaquePointer?
+        defer { if index != nil { git_index_free(index) } }
+        guard git_repository_index(&index, repo) == 0, let index else {
+            throw LibGit2Error.cannotGetIndex
+        }
+
+        guard git_index_has_conflicts(index) == 0 else {
+            throw LibGit2Error.mergeConflict
+        }
+
+        var treeOID = git_oid()
+        guard git_index_write_tree_to(&treeOID, index, repo) == 0 else {
+            throw LibGit2Error.cannotWriteTree
+        }
+
+        var tree: OpaquePointer?
+        defer { if tree != nil { git_tree_free(tree) } }
+        guard git_tree_lookup(&tree, repo, &treeOID) == 0, let tree else {
+            throw LibGit2Error.cannotWriteTree
+        }
+
+        var headCommit: OpaquePointer?
+        defer { if headCommit != nil { git_commit_free(headCommit) } }
+        var headOID = git_oid()
+        guard git_reference_name_to_id(&headOID, repo, "HEAD") == 0,
+              git_commit_lookup(&headCommit, repo, &headOID) == 0,
+              let headCommit else {
+            throw LibGit2Error.cannotGetHEAD
+        }
+
+        var mergeHeadOID = git_oid()
+        guard git_reference_name_to_id(&mergeHeadOID, repo, "MERGE_HEAD") == 0 else {
+            throw LibGit2Error.invalidRepositoryState("MERGE_HEAD is missing; nothing to commit.")
+        }
+        var mergeHeadCommit: OpaquePointer?
+        defer { if mergeHeadCommit != nil { git_commit_free(mergeHeadCommit) } }
+        guard git_commit_lookup(&mergeHeadCommit, repo, &mergeHeadOID) == 0,
+              let mergeHeadCommit else {
+            throw LibGit2Error.invalidRepositoryState("MERGE_HEAD does not reference a valid commit.")
+        }
+
+        var signature: UnsafeMutablePointer<git_signature>?
+        defer {
+            if signature != nil { git_signature_free(signature) }
+        }
+        guard git_signature_default(&signature, repo) == 0, let signature else {
+            throw LibGit2Error.commitFailed
+        }
+
+        var parents: [OpaquePointer?] = [headCommit, mergeHeadCommit]
+        var newCommitOID = git_oid()
+        let commitResult = parents.withUnsafeMutableBufferPointer { buffer -> Int32 in
+            var mutableBuffer = buffer
+            return git_commit_create(
+                &newCommitOID,
+                repo,
+                "HEAD",
+                signature,
+                signature,
+                nil,
+                "Merge branch 'upstream'",
+                tree,
+                2,
+                mutableBuffer.baseAddress
+            )
+        }
+        guard commitResult == 0 else {
+            throw LibGit2Error.commitFailed
+        }
+
+        git_repository_state_cleanup(repo)
+    }
+
+    /// 把 libgit2 返回码映射为语义化错误。
+    private static func networkError(from code: Int32, context: String) -> LibGit2Error {
+        let message = git_error_last().map { String(cString: $0.pointee.message) } ?? context
+        if isAuthenticationError(code, errorMessage: message) {
+            return .authenticationError
+        }
+        if isNetworkError(code, errorMessage: message) {
+            return .networkError(Int(code))
+        }
+        return .pullFailed(message)
+    }
+
+
     /// Fetch remote refs without merging them into the current branch.
     public static func fetch(at path: String, remote: String = "origin", prune: Bool = true, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             NetworkCallbacks.verbose = verbose
 
             let repo = try openRepository(at: path)
@@ -611,38 +767,41 @@ extension LibGit2 {
     ///   - url: 远程仓库 URL
     ///   - destination: 目标路径
     ///   - branch: 要克隆的分支（nil 表示默认分支）
-    ///   - depth: 浅克隆深度（0 表示完整克隆）
     ///   - onProgress: 接收 libgit2 报告的对象、delta 和字节数进度
-    ///   - shouldCancel: 返回 true 时中止传输并抛出 CancellationError
+    ///   - cancellation: 协作式取消令牌，可在传输中途中止
     public static func clone(
         url: String,
         to destination: String,
         branch: String? = nil,
-        depth: Int = 0,
         onProgress: (@Sendable (LibGit2CloneProgress) -> Void)? = nil,
-        shouldCancel: (@Sendable () -> Bool)? = nil
+        cancellation: GitCancellationToken? = nil
     ) throws {
-        if shouldCancel?() == true {
-            throw CancellationError()
-        }
+        try cancellation?.checkCancellation()
 
-        try LibGit2.serialized {
+        // clone 是最耗时的操作，必须以目标仓库为队列作用域，避免阻塞全局队列。
+        // 目标路径此刻通常尚不存在，队列池只把它当作稳定 key，不要求路径有效。
+        try LibGit2.serialized(at: destination) {
             os_log("\(t)Cloning repository from: \(url)")
 
             var cloneOpts = git_clone_options()
             git_clone_init_options(&cloneOpts, UInt32(GIT_CLONE_OPTIONS_VERSION))
 
-            // 设置分支
-            if let branch = branch {
-                cloneOpts.checkout_branch = UnsafePointer<CChar>(strdup(branch))
+            defer {
+                if let branchPointer = cloneOpts.checkout_branch {
+                    free(UnsafeMutableRawPointer(mutating: branchPointer))
+                }
             }
 
-            // NOTE: depth is not a direct member of git_clone_options in some libgit2 versions
-            // or it might need to be set via fetch_opts.custom_headers or similar if supported.
-            // For now removing it if it causes errors.
+            // 设置分支
+            if let branch = branch {
+                cloneOpts.checkout_branch = UnsafePointer(strdup(branch))
+            }
 
             // 设置 clone 专用进度回调。payload 必须在整个同步 git_clone 调用期间保持有效。
-            let progressPayload = CloneProgressPayload(onProgress: onProgress, shouldCancel: shouldCancel)
+            let progressPayload = CloneProgressPayload(
+                onProgress: onProgress,
+                cancellation: cancellation
+            )
             cloneOpts.fetch_opts.callbacks.transfer_progress = NetworkCallbacks.cloneTransferProgress
             cloneOpts.fetch_opts.callbacks.payload = Unmanaged.passUnretained(progressPayload).toOpaque()
 
@@ -652,14 +811,15 @@ extension LibGit2 {
             }
 
             if result != 0 || repo == nil {
-                if shouldCancel?() == true {
+                if cancellation?.isCancelled == true {
+                    // 取消发生在传输中途：清理可能残留的半成品目录，避免留下
+                    // 一个无法使用、又会让下次 clone 判定为"目录非空"的仓库。
+                    try? FileManager.default.removeItem(atPath: destination)
                     throw CancellationError()
                 }
-                if let error = git_error_last() {
-                    let message = String(cString: error.pointee.message)
-                    os_log("\(t)Clone failed: \(message)")
-                }
-                throw LibGit2Error.cloneFailed
+                let message = git_error_last().map { String(cString: $0.pointee.message) }
+                os_log("\(t)Clone failed: \(message ?? "unknown error")")
+                throw LibGit2Error.cloneFailed(message: message)
             }
 
             git_repository_free(repo)
@@ -672,7 +832,7 @@ extension LibGit2 {
     /// - Parameter url: 远程仓库 URL
     /// - Returns: 如果是有效的 Git 仓库返回 true
     public static func isValidGitRepository(_ url: String, at path: String) -> Bool {
-        return LibGit2.serialized {
+        return LibGit2.serialized(at: path) {
             guard let repo = try? openRepository(at: path) else { return false }
             defer { git_repository_free(repo) }
 

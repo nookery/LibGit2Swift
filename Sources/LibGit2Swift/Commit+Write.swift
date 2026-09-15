@@ -11,7 +11,7 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 创建的提交哈希
     public static func createCommit(message: String, at path: String, verbose: Bool) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Creating commit with message: \(message)") }
 
             let repo = try openRepository(at: path)
@@ -108,7 +108,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 创建的提交哈希
     public static func addAndCommit(files: [String], message: String, at path: String, verbose: Bool = true) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Adding and committing files: \(files)") }
             try addFiles(files, at: path, verbose: verbose)
             return try createCommit(message: message, at: path, verbose: verbose)
@@ -121,7 +121,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 新的提交哈希
     public static func amendCommit(message: String? = nil, at path: String, verbose: Bool) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Amending commit with message: \(message ?? "nil")") }
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }

@@ -46,7 +46,7 @@ extension LibGit2 {
         at path: String,
         fromCommit commitHash: String? = nil
     ) throws -> [GitBlameLine] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

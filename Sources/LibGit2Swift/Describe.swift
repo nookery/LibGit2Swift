@@ -20,7 +20,7 @@ extension LibGit2 {
         annotatedOnly: Bool = false,
         abbrev: Int = 7
     ) throws -> String? {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

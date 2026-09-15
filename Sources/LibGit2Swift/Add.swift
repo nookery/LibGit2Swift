@@ -11,7 +11,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func addFiles(_ files: [String], at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("\(self.t)Adding files to staging area") }
 
             let repo = try openRepository(at: path)

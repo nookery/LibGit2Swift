@@ -23,7 +23,7 @@ public struct GitWorktree: Identifiable, Equatable, Hashable, Sendable {
 extension LibGit2 {
     /// 获取所有 worktree 列表，等价于 `git worktree list`。
     public static func listWorktrees(at path: String) throws -> [GitWorktree] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -98,7 +98,7 @@ extension LibGit2 {
         createBranch: Bool = false,
         in mainRepoPath: String
     ) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: mainRepoPath) {
             var repo = try openRepository(at: mainRepoPath)
             defer { git_repository_free(repo) }
 
@@ -150,7 +150,7 @@ extension LibGit2 {
 
     /// 删除 worktree。
     public static func removeWorktree(named name: String, at path: String, force: Bool = false) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -176,7 +176,7 @@ extension LibGit2 {
 
     /// 锁定 worktree。
     public static func lockWorktree(named name: String, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -196,7 +196,7 @@ extension LibGit2 {
 
     /// 解锁 worktree。
     public static func unlockWorktree(named name: String, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

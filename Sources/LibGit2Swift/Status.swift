@@ -10,7 +10,7 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志，默认为true
     /// - Returns: 如果有未提交的变更返回 true
     public static func hasUncommittedChanges(at path: String, verbose: Bool = true) throws -> Bool {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -42,7 +42,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 状态信息字符串
     public static func getStatus(at path: String, verbose: Bool = true) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             if verbose { os_log("\(t) Getting status at path: \(path)") }
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }

@@ -50,11 +50,14 @@ final class NetworkTests: LibGit2SwiftTestCase {
     func testCloneCanBeCancelledBeforeStarting() throws {
         let clonePath = testRepo.tempDirectory.appendingPathComponent("cancelled-clone").path
 
+        let token = GitCancellationToken()
+        token.cancel()
+
         XCTAssertThrowsError(
             try LibGit2.clone(
                 url: "/nonexistent/path",
                 to: clonePath,
-                shouldCancel: { true }
+                cancellation: token
             )
         ) { error in
             XCTAssertTrue(error is CancellationError)
@@ -123,9 +126,11 @@ final class NetworkTests: LibGit2SwiftTestCase {
             message: "Initial commit"
         )
 
-        // 尝试push到不存在的远程
-        XCTAssertThrowsError(try LibGit2.push(at: testRepo.repositoryPath, remote: "nonexistent", verbose: false)) { error in
-            XCTAssertTrue(error is LibGit2Error)
+        // 未设置 upstream 时 push 必须先报错（而不是假定远程分支名与本地同名）
+        XCTAssertThrowsError(try LibGit2.push(at: testRepo.repositoryPath, verbose: false)) { error in
+            guard case LibGit2Error.noUpstreamConfigured = error else {
+                return XCTFail("expected noUpstreamConfigured, got \(error)")
+            }
         }
     }
 
@@ -189,9 +194,12 @@ final class NetworkTests: LibGit2SwiftTestCase {
             message: "Initial commit"
         )
 
-        // 尝试pull从不存在的远程
-        XCTAssertThrowsError(try LibGit2.pull(at: testRepo.repositoryPath, remote: "nonexistent", verbose: false)) { error in
-            XCTAssertTrue(error is LibGit2Error)
+        // 未设置 upstream 时 pull 应报 noUpstreamConfigured；
+        // 这是取代"假定远程分支名与本地同名"后的正确行为。
+        XCTAssertThrowsError(try LibGit2.pull(at: testRepo.repositoryPath, verbose: false)) { error in
+            guard case LibGit2Error.noUpstreamConfigured = error else {
+                return XCTFail("expected noUpstreamConfigured, got \(error)")
+            }
         }
     }
 

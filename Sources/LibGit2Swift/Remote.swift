@@ -11,7 +11,7 @@ extension LibGit2 {
     ///   - verbose: 是否输出详细日志
     /// - Returns: 未推送的提交列表
     public static func getUnPushedCommits(at path: String, verbose: Bool) throws -> [GitCommit] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -205,7 +205,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 未拉取的提交数量
     public static func getUnPulledCount(at path: String) throws -> Int {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -282,7 +282,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 远程仓库列表
     public static func getRemoteList(at path: String) throws -> [GitRemote] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -351,7 +351,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func addRemote(name: String, url: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -380,7 +380,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func removeRemote(name: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Removing remote: %{public}@", name) }
 
             let repo = try openRepository(at: path)
@@ -403,7 +403,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func setRemoteURL(name: String, url: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Setting remote URL: %{public}@ -> %{public}@", name, url) }
 
             let repo = try openRepository(at: path)
@@ -438,7 +438,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     /// - Returns: 远程仓库 URL
     public static func getRemoteURL(name: String, at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -482,7 +482,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - verbose: 是否输出详细日志，默认为true
     public static func renameRemote(oldName: String, to newName: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Renaming remote: %{public}@ -> %{public}@", oldName, newName) }
 
             let repo = try openRepository(at: path)

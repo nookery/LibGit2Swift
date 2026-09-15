@@ -8,7 +8,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 仓库指针
     public static func createRepository(at path: String) throws -> OpaquePointer {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             var repo: OpaquePointer? = nil
             let result = git_repository_init(&repo, path, 0)
 
@@ -31,7 +31,7 @@ extension LibGit2 {
     /// - Parameter path: 要检查的路径
     /// - Returns: 如果是 Git 仓库返回 true，否则返回 false
     public static func isGitRepository(at path: String) -> Bool {
-        return LibGit2.serialized {
+        return LibGit2.serialized(at: path) {
             var repo: OpaquePointer? = nil
             // 使用默认 flag (0)，允许向上搜索找到仓库根目录
             // 这比 GIT_REPOSITORY_OPEN_NO_SEARCH 更宽容：
@@ -52,7 +52,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库中的任意路径
     /// - Returns: 仓库根目录路径，如果不是仓库则返回 nil
     public static func repositoryRoot(at path: String) -> String? {
-        return LibGit2.serialized {
+        return LibGit2.serialized(at: path) {
             var repo: OpaquePointer? = nil
             defer {
                 if repo != nil { git_repository_free(repo) }
@@ -81,7 +81,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: HEAD 引用名称或 commit hash（如果 detached）
     public static func getHEAD(at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -164,7 +164,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 当前分支名称，如果 HEAD detached 返回 commit hash
     public static func getCurrentBranch(at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             return try getHEAD(at: path)
         }
     }
@@ -173,7 +173,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 如果 HEAD detached 返回 true
     public static func isHEADDetached(at path: String) throws -> Bool {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -185,7 +185,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: 如果是空仓库返回 true
     public static func isEmptyRepository(at path: String) throws -> Bool {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -197,7 +197,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库中的任意路径
     /// - Returns: 仓库的 .git 目录路径
     public static func gitDirectory(at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -218,7 +218,7 @@ extension LibGit2 {
     ///   - remote: 远程仓库名称（默认 "origin"）
     /// - Returns: 远程 URL，如果失败返回 nil
     public static func getRemoteURL(at path: String, remote: String = "origin") -> String? {
-        return LibGit2.serialized {
+        return LibGit2.serialized(at: path) {
             do {
                 let repo = try openRepository(at: path)
                 defer { git_repository_free(repo) }
@@ -249,7 +249,7 @@ extension LibGit2 {
     ///   - remote: 远程仓库名称
     ///   - url: 新的 URL
     public static func setRemoteURL(at path: String, remote: String = "origin", url: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

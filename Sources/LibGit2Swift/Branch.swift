@@ -16,7 +16,7 @@ extension LibGit2 {
     ///   - includeRemote: 是否包含远程分支
     /// - Returns: 分支列表
     public static func getBranchList(at path: String, includeRemote: Bool = false) throws -> [GitBranch] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -108,14 +108,14 @@ extension LibGit2 {
 
     /// 获取本地分支列表
     public static func getLocalBranches(at path: String) throws -> [GitBranch] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             return try getBranchList(at: path, includeRemote: false)
         }
     }
 
     /// 获取远程分支列表
     public static func getRemoteBranches(at path: String) throws -> [GitBranch] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -180,7 +180,7 @@ extension LibGit2 {
 
     /// 获取当前分支信息
     public static func getCurrentBranchInfo(at path: String) throws -> GitBranch? {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let branches = try getBranchList(at: path, includeRemote: false)
             return branches.first { $0.isCurrent }
         }
@@ -193,7 +193,7 @@ extension LibGit2 {
     ///   - checkout: 是否立即切换到新分支
     /// - Returns: 创建的分支名称
     public static func createBranch(named name: String, at path: String, checkout: Bool = false) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -247,7 +247,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - force: 是否强制删除
     public static func deleteBranch(named name: String, at path: String, force: Bool = false) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -276,7 +276,7 @@ extension LibGit2 {
     ///   - path: 仓库路径
     ///   - force: 是否强制重命名
     public static func renameBranch(named name: String, to newName: String, at path: String, force: Bool = false) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -330,7 +330,7 @@ extension LibGit2 {
 
     /// 获取远程分支短名称，等价于 `git branch -r --format=%(refname:short)`。
     public static func getRemoteBranchNames(at path: String, remote: String? = nil) throws -> [String] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let trimmedRemote = remote?.trimmingCharacters(in: .whitespacesAndNewlines)
             return try getRemoteBranches(at: path)
                 .map(\.id)
@@ -345,7 +345,7 @@ extension LibGit2 {
 
     /// 设置本地分支 upstream，upstreamBranch 使用 `origin/main` 这种短名称。
     public static func setUpstream(localBranch: String, upstreamBranch: String, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedUpstreamBranch = upstreamBranch.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -373,7 +373,7 @@ extension LibGit2 {
 
     /// 清除本地分支 upstream。
     public static func unsetUpstream(localBranch: String, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedLocalBranch = localBranch.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmedLocalBranch.isEmpty == false else {
                 throw LibGit2Error.invalidReference
@@ -399,7 +399,7 @@ extension LibGit2 {
 
     /// 比较 HEAD 与 upstream 的 ahead/behind 状态。
     public static func aheadBehind(at path: String) throws -> GitAheadBehind {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -437,7 +437,7 @@ extension LibGit2 {
 
     /// 比较两个引用，等价于 GitOK 当前使用的 `rev-list` / `log` / `diff --name-status` 组合。
     public static func compareBranches(base: String, head: String, at path: String) throws -> GitBranchCompare {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let trimmedBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedHead = head.trimmingCharacters(in: .whitespacesAndNewlines)
 

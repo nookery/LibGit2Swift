@@ -43,7 +43,7 @@ extension LibGit2 {
     /// - Parameter path: 仓库路径
     /// - Returns: reflog 条目列表
     public static func getReflog(at path: String) throws -> [GitReflogEntry] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -111,7 +111,7 @@ extension LibGit2 {
 
     /// 删除指定 reflog 条目，等价于 `git reflog delete HEAD@{index}`。
     public static func deleteReflogEntry(at index: Int, path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -134,7 +134,7 @@ extension LibGit2 {
 
     /// 清空 reflog，等价于 `git reflog expire --expire=now --all`。
     public static func clearReflog(at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 

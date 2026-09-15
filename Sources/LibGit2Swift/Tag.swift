@@ -10,7 +10,7 @@ extension LibGit2 {
     ///   - commitHash: 可选的提交哈希，只返回指向该提交的标签
     /// - Returns: 标签名称列表
     public static func getTags(at path: String, for commitHash: String? = nil) throws -> [String] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -51,7 +51,7 @@ extension LibGit2 {
     ///   - commitHash: 提交哈希（nil 表示使用 HEAD）
     ///   - path: 仓库路径
     public static func createTag(named name: String, message: String? = nil, at commitHash: String? = nil, in path: String, verbose: Bool) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Creating tag: %{public}@", name) }
 
             let repo = try openRepository(at: path)
@@ -120,7 +120,7 @@ extension LibGit2 {
     ///   - name: 标签名称
     ///   - path: 仓库路径
     public static func deleteTag(named name: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if verbose { os_log("🐚 LibGit2: Deleting tag: %{public}@", name) }
 
             let repo = try openRepository(at: path)

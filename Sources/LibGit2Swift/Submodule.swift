@@ -63,7 +63,7 @@ private func submoduleStatus(from rawStatus: UInt32) -> GitSubmoduleInfo.Status 
 
 extension LibGit2 {
     public static func submodules(at path: String) throws -> [GitSubmoduleInfo] {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -81,7 +81,7 @@ extension LibGit2 {
     }
 
     public static func initializeSubmodules(paths: [String] = [], at path: String, recursive: Bool = true, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             try updateSubmodules(paths: paths, at: path, initialize: true, recursive: recursive, verbose: verbose)
         }
     }
@@ -93,7 +93,7 @@ extension LibGit2 {
         recursive: Bool = true,
         verbose: Bool = true
     ) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -129,7 +129,7 @@ extension LibGit2 {
     }
 
     public static func submoduleDiff(path submodulePath: String, at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             guard let submodule = try submodules(at: path).first(where: { $0.path == submodulePath }) else {
                 throw LibGit2Error.invalidReference
             }

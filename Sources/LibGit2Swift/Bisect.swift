@@ -29,7 +29,7 @@ public struct GitBisectState: Equatable, Sendable {
 extension LibGit2 {
     /// 检查当前是否在 bisect 过程中。
     public static func bisectState(at path: String) throws -> GitBisectState {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let gitDir = try gitDirectory(at: path)
             let bisectLogPath = (gitDir as NSString).appendingPathComponent("BISECT_LOG")
 
@@ -54,7 +54,7 @@ extension LibGit2 {
         goodCommitHash: String? = nil,
         at path: String
     ) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -114,7 +114,7 @@ extension LibGit2 {
     /// 标记当前 commit 为 good。
     @discardableResult
     public static func bisectGood(_ commitHash: String? = nil, at path: String) throws -> String? {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let gitDir = try gitDirectory(at: path)
             try? "good\nbad\n".write(
                 toFile: (gitDir as NSString).appendingPathComponent("BISECT_TERMS"),
@@ -141,7 +141,7 @@ extension LibGit2 {
     /// 标记当前 commit 为 bad。
     @discardableResult
     public static func bisectBad(_ commitHash: String? = nil, at path: String) throws -> String? {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let gitDir = try gitDirectory(at: path)
 
             if let hash = commitHash {
@@ -163,7 +163,7 @@ extension LibGit2 {
 
     /// 跳过当前 commit。
     public static func bisectSkip(at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let gitDir = try gitDirectory(at: path)
             let currentHash = try currentHEADHash(at: path)
             appendBisectLog(gitDir: gitDir, action: "skip", hash: currentHash)
@@ -172,7 +172,7 @@ extension LibGit2 {
 
     /// 结束 bisect，切换回原分支。
     public static func bisectReset(at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let gitDir = try gitDirectory(at: path)
             let startHash = try? readFileString((gitDir as NSString).appendingPathComponent("BISECT_START"))
 

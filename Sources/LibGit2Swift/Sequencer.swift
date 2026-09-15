@@ -9,14 +9,14 @@ public enum GitConflictFileVersion {
 
 extension LibGit2 {
     public static func conflictFileContent(path filePath: String, version: GitConflictFileVersion, at path: String) throws -> String {
-        return try LibGit2.serialized {
+        return try LibGit2.serialized(at: path) {
             let data = try conflictFileData(path: filePath, version: version, at: path)
             return String(decoding: data, as: UTF8.self)
         }
     }
 
     public static func checkoutConflictFileVersion(path filePath: String, version: GitConflictFileVersion, at path: String) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let data = try conflictFileData(path: filePath, version: version, at: path)
             let targetURL = URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent(filePath)
             try FileManager.default.createDirectory(
@@ -28,7 +28,7 @@ extension LibGit2 {
     }
 
     public static func revertCommit(_ commitHash: String, at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -55,7 +55,7 @@ extension LibGit2 {
     }
 
     public static func cherryPick(commits commitHashes: [String], at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             let trimmedHashes = commitHashes
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { $0.isEmpty == false }
@@ -71,7 +71,7 @@ extension LibGit2 {
     }
 
     public static func continueCherryPick(at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             if try hasMergeConflicts(at: path) {
                 throw LibGit2Error.mergeConflict
             }
@@ -96,7 +96,7 @@ extension LibGit2 {
     }
 
     public static func abortCherryPick(at path: String, verbose: Bool = true) throws {
-        try LibGit2.serialized {
+        try LibGit2.serialized(at: path) {
             try reset(to: nil, mode: "hard", at: path, verbose: verbose)
 
             let repo = try openRepository(at: path)
