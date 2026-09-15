@@ -188,6 +188,29 @@ final class UpstreamTests: XCTestCase {
         XCTAssertFalse(try LibGit2.hasUncommittedChanges(at: local.path, verbose: false))
     }
 
+    func testPullRebaseStrategyRebasesLocalCommitsOntoUpstream() throws {
+        let (remote, local) = try makeLocalWithUpstream(named: "rebase-diverge")
+
+        let pusher = try cloneInto(named: "rebase-diverge-pusher", remote: remote)
+        try commit(in: pusher, file: "remote.txt", content: "remote", message: "remote change")
+        try runGit(["push", "origin", "main"], in: pusher)
+
+        try commit(in: local, file: "local.txt", content: "local", message: "local change")
+
+        try LibGit2.pull(at: local.path, strategy: .rebase, verbose: false)
+
+        let parents = try runGit(["rev-list", "--parents", "-n", "1", "HEAD"], in: local)
+            .split(separator: " ")
+        XCTAssertEqual(parents.count, 2, "rebased commit should have one parent")
+        XCTAssertEqual(
+            try runGit(["show", "-s", "--format=%s", "HEAD"], in: local).trimmingCharacters(in: .whitespacesAndNewlines),
+            "local change"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.appendingPathComponent("local.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.appendingPathComponent("remote.txt").path))
+        XCTAssertFalse(try LibGit2.hasUncommittedChanges(at: local.path, verbose: false))
+    }
+
     /// 关键安全回归：快进时若存在会冲突的本地改动，必须拒绝并保留用户改动，
     /// 而不是像历史实现那样使用 GIT_CHECKOUT_FORCE 覆盖。
     func testPullFastForwardPreservesConflictingLocalChanges() throws {

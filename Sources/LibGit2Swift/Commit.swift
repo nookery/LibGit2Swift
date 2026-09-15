@@ -31,6 +31,59 @@ extension LibGit2 {
         }
     }
 
+    /// 统计指定遍历范围内的提交数量，不把提交对象全部加载到内存。
+    public static func getCommitCount(
+        at path: String,
+        scope: CommitTraversalScope = .head,
+        cancellation: GitCancellationToken? = nil
+    ) throws -> Int {
+        try LibGit2.serialized(at: path) {
+            try checkCancellation(cancellation)
+            let repo = try openRepositoryUnlocked(at: path)
+            defer { git_repository_free(repo) }
+
+            var revwalk: OpaquePointer?
+            guard git_revwalk_new(&revwalk, repo) == 0, let walker = revwalk else {
+                throw LibGit2Error.cannotCreateRevwalk
+            }
+            defer { git_revwalk_free(walker) }
+            git_revwalk_sorting(walker, GIT_SORT_TOPOLOGICAL.rawValue | GIT_SORT_TIME.rawValue)
+
+            switch scope {
+            case .head:
+                guard git_revwalk_push_head(walker) == 0 else { return 0 }
+            case .allReferences:
+                if pushAllGraphReferences(repo: repo, walker: walker) == 0,
+                   git_revwalk_push_head(walker) != 0 {
+                    return 0
+                }
+            }
+
+            var count = 0
+            var oid = git_oid()
+            while git_revwalk_next(&oid, walker) == 0 {
+                try checkCancellation(cancellation)
+                count += 1
+            }
+            return count
+        }
+    }
+
+    /// 当前 HEAD 可达历史中最早 root commit 的作者日期。
+    public static func getFirstCommitDate(
+        at path: String,
+        cancellation: GitCancellationToken? = nil
+    ) throws -> Date? {
+        try LibGit2.serialized(at: path) {
+            let commits = try getCommitList(at: path, limit: Int.max, skip: 0)
+            try checkCancellation(cancellation)
+            return commits
+                .filter { $0.parentHashes.isEmpty }
+                .map(\.date)
+                .min()
+        }
+    }
+
     /// 获取用于提交拓扑图的提交列表。
     ///
     /// 返回结果按拓扑优先、时间倒序遍历，并包含本地分支、远程分支和标签引用。

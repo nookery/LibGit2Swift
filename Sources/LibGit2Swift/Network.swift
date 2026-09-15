@@ -201,7 +201,7 @@ extension LibGit2 {
         try LibGit2.serialized(at: path) {
             guard let binding = try upstreamBinding(at: path) else {
                 let branch = (try? currentBranchName(at: path)) ?? "HEAD"
-                throw LibGit2Error.noUpstreamConfigured(branch: branch ?? "HEAD")
+                throw LibGit2Error.noUpstreamConfigured(branch: branch)
             }
             // 推送到 upstream 指向的远程分支：
             //   refs/heads/<local> -> refs/heads/<remoteBranch>
@@ -463,7 +463,7 @@ extension LibGit2 {
             var analysis = git_merge_analysis_t(rawValue: 0)
             var preference = git_merge_preference_t(rawValue: 0)
             var analysisCommits: [OpaquePointer?] = [remoteCommit]
-            analysisCommits.withUnsafeMutableBufferPointer { buffer in
+            _ = analysisCommits.withUnsafeMutableBufferPointer { buffer in
                 git_merge_analysis(&analysis, &preference, repo, buffer.baseAddress, 1)
             }
 
@@ -491,9 +491,22 @@ extension LibGit2 {
             }
 
             if strategy == .rebase {
-                throw LibGit2Error.pullFailed(
-                    "Rebase strategy requires the rebase API; use .merge or .fastForwardOnly."
-                )
+                do {
+                    try rebase(
+                        at: path,
+                        upstream: binding.remoteTrackingReference,
+                        onto: binding.remoteTrackingReference,
+                        verbose: verbose
+                    )
+                } catch LibGit2Error.mergeConflict {
+                    throw LibGit2Error.mergeConflict
+                } catch {
+                    throw LibGit2Error.pullFailed(error.localizedDescription)
+                }
+                if NetworkCallbacks.verbose {
+                    os_log("\(t)Pull completed (rebase)")
+                }
+                return
             }
 
             // 普通合并：先做安全检查，禁止覆盖未提交改动。
@@ -685,7 +698,7 @@ extension LibGit2 {
         var parents: [OpaquePointer?] = [headCommit, mergeHeadCommit]
         var newCommitOID = git_oid()
         let commitResult = parents.withUnsafeMutableBufferPointer { buffer -> Int32 in
-            var mutableBuffer = buffer
+            let mutableBuffer = buffer
             return git_commit_create(
                 &newCommitOID,
                 repo,

@@ -10,7 +10,7 @@
 
 ## 第二阶段：高级功能
 
-- [ ] **Rebase** — 变基操作（git rebase），支持 start/continue/abort（**尚未实现**：源码中无 Rebase 封装，`git_rebase_*` 仅存在于 C 头文件）
+- [x] **Rebase** — 变基操作（git rebase），支持 start/continue/abort
 - [x] **Describe** — 提交描述（git describe），生成可读版本号
 - [x] **Stash 增强** — stash list 返回变更文件数量、diff 预览、创建时间
 - [x] **Config 增强** — 读取全局配置（非仓库级别），支持列出所有 key-value

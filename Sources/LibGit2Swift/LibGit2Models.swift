@@ -1,5 +1,13 @@
 import Foundation
 
+extension LibGit2 {
+    /// Stable facade names for model types used by clients that also import a
+    /// package or enum named `LibGit2Swift`.
+    public typealias Commit = GitCommit
+    public typealias DiffFile = GitDiffFile
+    public typealias RepositoryStatusEntry = GitRepositoryStatusEntry
+}
+
 /// Git 分支模型
 public struct GitBranch: Identifiable, Codable, Hashable {
     public let id: String

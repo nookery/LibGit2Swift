@@ -818,4 +818,31 @@ final class CommitTests: LibGit2SwiftTestCase {
         assertFileExists("file2.txt", in: testRepo)
         assertFileExists("file3.txt", in: testRepo)
     }
+
+    func testCommitCountAndFirstCommitDate() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "first.txt",
+            content: "First",
+            message: "First commit"
+        )
+        try testRepo.createFileAndCommit(
+            fileName: "second.txt",
+            content: "Second",
+            message: "Second commit"
+        )
+
+        XCTAssertEqual(
+            try LibGit2.getCommitCount(at: testRepo.repositoryPath),
+            2
+        )
+        XCTAssertNotNil(try LibGit2.getFirstCommitDate(at: testRepo.repositoryPath))
+
+        let token = GitCancellationToken()
+        token.cancel()
+        XCTAssertThrowsError(
+            try LibGit2.getCommitCount(at: testRepo.repositoryPath, cancellation: token)
+        ) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
 }

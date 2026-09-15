@@ -236,4 +236,103 @@ final class StatusTests: LibGit2SwiftTestCase {
         let unstagedFiles = try LibGit2.getUnstagedFiles(at: testRepo.repositoryPath)
         XCTAssertTrue(unstagedFiles.contains("file1.txt"), "Should contain modified file")
     }
+
+    func testTypedRepositoryStatusIncludesStagedUnstagedAndUntrackedFiles() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "tracked.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        try "Modified".write(
+            to: testRepo.tempDirectory.appendingPathComponent("tracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Staged".write(
+            to: testRepo.tempDirectory.appendingPathComponent("staged.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try LibGit2.addFiles(["staged.txt"], at: testRepo.repositoryPath)
+        try "Untracked".write(
+            to: testRepo.tempDirectory.appendingPathComponent("untracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let entries = try LibGit2.getStatusEntries(at: testRepo.repositoryPath)
+        XCTAssertEqual(Set(entries.map(\.path)), ["tracked.txt", "staged.txt", "untracked.txt"])
+        XCTAssertEqual(entries.first(where: { $0.path == "tracked.txt" })?.worktreeStatus, "M")
+        XCTAssertEqual(entries.first(where: { $0.path == "staged.txt" })?.stagedStatus, "A")
+        XCTAssertTrue(entries.first(where: { $0.path == "untracked.txt" })?.isUntracked == true)
+
+        let summary = try LibGit2.getRepositoryStatus(at: testRepo.repositoryPath)
+        XCTAssertFalse(summary.isClean)
+        XCTAssertEqual(summary.changeCount, 3)
+        XCTAssertNotNil(summary.branch)
+    }
+
+    func testTypedRepositoryStatusMapsRenamesToTheNewPath() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "old.txt",
+            content: "rename me",
+            message: "Initial commit"
+        )
+
+        let oldURL = testRepo.tempDirectory.appendingPathComponent("old.txt")
+        let newURL = testRepo.tempDirectory.appendingPathComponent("new.txt")
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+        try LibGit2.addFiles([], at: testRepo.repositoryPath)
+
+        let entries = try LibGit2.getStatusEntries(at: testRepo.repositoryPath)
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entry.path, "new.txt")
+        XCTAssertEqual(entry.stagedStatus, "R")
+        XCTAssertEqual(entry.worktreeStatus, " ")
+    }
+
+    func testDiscardAllChangesRestoresTrackedFilesAndPreservesIgnoredFiles() throws {
+        try testRepo.createFileAndCommit(
+            fileName: ".gitignore",
+            content: "ignored.txt\n",
+            message: "Add ignore rules"
+        )
+        try testRepo.createFileAndCommit(
+            fileName: "tracked.txt",
+            content: "Original",
+            message: "Add tracked file"
+        )
+
+        try "Modified".write(
+            to: testRepo.tempDirectory.appendingPathComponent("tracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Staged new".write(
+            to: testRepo.tempDirectory.appendingPathComponent("staged.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try LibGit2.addFiles(["staged.txt"], at: testRepo.repositoryPath)
+        try "Untracked".write(
+            to: testRepo.tempDirectory.appendingPathComponent("untracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Ignored".write(
+            to: testRepo.tempDirectory.appendingPathComponent("ignored.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try LibGit2.discardAllChanges(at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertEqual(try testRepo.readFile("tracked.txt"), "Original")
+        assertFileNotExists("staged.txt", in: testRepo)
+        assertFileNotExists("untracked.txt", in: testRepo)
+        assertFileExists("ignored.txt", in: testRepo)
+        XCTAssertTrue(try LibGit2.getRepositoryStatus(at: testRepo.repositoryPath).isClean)
+    }
 }
