@@ -187,4 +187,73 @@ extension LibGit2 {
         }
         return repo
     }
+
+    // MARK: - 合并基础 (merge base)
+
+    /// 两个提交的合并基础 (merge base) commit hash。
+    ///
+    /// 合并冲突的「base」版本即来自此处：base 是双方共同的祖先，
+    /// `ours` 是当前 HEAD，`theirs` 是正在被合并进来的提交。
+    ///
+    /// - Returns: 合并基础 commit hash；无共同祖先时返回 `nil`
+    public static func mergeBase(
+        between first: String,
+        and second: String,
+        at path: String
+    ) throws -> String? {
+        try LibGit2.serialized(at: path) {
+            let repo = try openRepositoryUnlocked(at: path)
+            defer { git_repository_free(repo) }
+
+            var firstOID = git_oid()
+            var secondOID = git_oid()
+            guard git_oid_fromstr(&firstOID, first) == 0,
+                  git_oid_fromstr(&secondOID, second) == 0 else {
+                throw LibGit2Error.invalidValue
+            }
+
+            var mergeBaseOID = git_oid()
+            guard git_merge_base(&mergeBaseOID, repo, &firstOID, &secondOID) == 0 else {
+                // GIT_ENOTFOUND 表示两个提交没有共同祖先（例如不相关的历史）。
+                return nil
+            }
+            return oidToString(mergeBaseOID)
+        }
+    }
+
+    /// 合并冲突中 `base` 版本的文件内容。
+    ///
+    /// `base` 即 HEAD 与 MERGE_HEAD 的合并基础。此前 provider 只能对该版本
+    /// 抛出"不支持"，因为库未暴露 merge-base 到文件内容的通路。
+    ///
+    /// - Parameters:
+    ///   - filePath: 仓库内相对路径
+    ///   - path: 仓库路径
+    /// - Returns: base 版本内容；该文件在 base 中不存在时返回 `nil`
+    public static func mergeBaseFileContent(
+        path filePath: String,
+        at path: String
+    ) throws -> String? {
+        try LibGit2.serialized(at: path) {
+            let repo = try openRepositoryUnlocked(at: path)
+            defer { git_repository_free(repo) }
+
+            // HEAD 与 MERGE_HEAD 的合并基础。
+            var headOID = git_oid()
+            var mergeHeadOID = git_oid()
+            guard git_reference_name_to_id(&headOID, repo, "HEAD") == 0,
+                  git_reference_name_to_id(&mergeHeadOID, repo, "MERGE_HEAD") == 0 else {
+                return nil
+            }
+
+            var mergeBaseOID = git_oid()
+            guard git_merge_base(&mergeBaseOID, repo, &headOID, &mergeHeadOID) == 0 else {
+                return nil
+            }
+            let baseHash = oidToString(mergeBaseOID)
+
+            // 复用已实现的按提交取内容；文件在 base 中不存在时返回 nil。
+            return try? getFileContent(atCommit: baseHash, file: filePath, at: path)
+        }
+    }
 }

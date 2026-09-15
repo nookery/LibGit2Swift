@@ -173,17 +173,14 @@ extension LibGit2 {
         return !conflicts.isEmpty
     }
 
-    /// 检查是否正在合并
+    /// 检查是否正在合并。
+    ///
+    /// 使用 `LibGit2.repositoryState(at:)` 判定，而不是探测 `.git/MERGE_HEAD`。
+    /// 后者在 worktree（`.git` 是文件而非目录）与 seqencer 状态下不可靠。
     /// - Parameter path: 仓库路径
     /// - Returns: 如果正在合并返回 true
     static func isMerging(at path: String) throws -> Bool {
-        let repo = try openRepository(at: path)
-        defer { git_repository_free(repo) }
-
-        // 检查 MERGE_HEAD 是否存在
-        var mergeHeadOID = git_oid()
-        let result = git_reference_name_to_id(&mergeHeadOID, repo, "MERGE_HEAD")
-        return result == 0
+        try repositoryState(at: path) == .merge
     }
 
     /// 中止合并
