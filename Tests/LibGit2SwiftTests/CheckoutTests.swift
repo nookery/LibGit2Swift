@@ -466,6 +466,75 @@ final class CheckoutTests: LibGit2SwiftTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: newFileURL.path))
     }
 
+    func testDiscardFileChangesRemovesStagedNewFile() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "initial.txt",
+            content: "Content",
+            message: "Initial commit"
+        )
+
+        let newFileURL = testRepo.tempDirectory.appendingPathComponent("new.txt")
+        try "New".write(to: newFileURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["new.txt"], at: testRepo.repositoryPath)
+
+        try LibGit2.discardFileChanges("new.txt", at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: newFileURL.path))
+        XCTAssertTrue(try LibGit2.getStatusEntries(at: testRepo.repositoryPath).isEmpty)
+    }
+
+    func testDiscardFileChangesRestoresStagedTrackedFile() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "tracked.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("tracked.txt")
+        try "Modified".write(to: fileURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["tracked.txt"], at: testRepo.repositoryPath)
+
+        try LibGit2.discardFileChanges("tracked.txt", at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertEqual(try String(contentsOf: fileURL, encoding: .utf8), "Original")
+        XCTAssertTrue(try LibGit2.getStatusEntries(at: testRepo.repositoryPath).isEmpty)
+    }
+
+    func testDiscardFileChangesRemovesUntrackedFileAndSupportsEmptyRepository() throws {
+        let fileURL = testRepo.tempDirectory.appendingPathComponent("untracked.txt")
+        try "Untracked".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        try LibGit2.discardFileChanges("untracked.txt", at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(try LibGit2.getStatusEntries(at: testRepo.repositoryPath).isEmpty)
+    }
+
+    func testDiscardFilesOnlyDiscardsSelectedFiles() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "tracked.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        let trackedURL = testRepo.tempDirectory.appendingPathComponent("tracked.txt")
+        try "Modified".write(to: trackedURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["tracked.txt"], at: testRepo.repositoryPath)
+
+        let newFileURL = testRepo.tempDirectory.appendingPathComponent("new.txt")
+        try "New".write(to: newFileURL, atomically: true, encoding: .utf8)
+        try LibGit2.addFiles(["new.txt"], at: testRepo.repositoryPath)
+
+        try LibGit2.discardFiles(["tracked.txt"], at: testRepo.repositoryPath, verbose: false)
+
+        XCTAssertEqual(try String(contentsOf: trackedURL, encoding: .utf8), "Original")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newFileURL.path))
+        let remaining = try XCTUnwrap(
+            LibGit2.getStatusEntries(at: testRepo.repositoryPath).first(where: { $0.path == "new.txt" })
+        )
+        XCTAssertEqual(remaining.stagedStatus, "A")
+    }
+
     func testCheckoutFileEmptyRepository() throws {
         // 空仓库检出文件应该失败
         XCTAssertThrowsError(try LibGit2.checkoutFile("file.txt", at: testRepo.repositoryPath, verbose: false)) { error in
