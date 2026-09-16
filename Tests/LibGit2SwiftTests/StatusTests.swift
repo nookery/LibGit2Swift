@@ -6,6 +6,60 @@ import XCTest
 final class StatusTests: LibGit2SwiftTestCase {
     // MARK: - Basic Status Tests
 
+    func testCancellableRepositoryStatusHonorsPreCancelledToken() throws {
+        let cancellation = GitCancellationToken()
+        cancellation.cancel()
+
+        XCTAssertThrowsError(
+            try LibGit2.getRepositoryStatus(
+                at: testRepo.repositoryPath,
+                cancellation: cancellation
+            )
+        ) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
+    func testCancellableStatusEntriesPreserveFileStatuses() throws {
+        try testRepo.createFileAndCommit(
+            fileName: "tracked.txt",
+            content: "Original",
+            message: "Initial commit"
+        )
+
+        try "Modified".write(
+            to: testRepo.tempDirectory.appendingPathComponent("tracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Untracked".write(
+            to: testRepo.tempDirectory.appendingPathComponent("untracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let entries = try LibGit2.getStatusEntries(
+            at: testRepo.repositoryPath,
+            cancellation: GitCancellationToken()
+        )
+
+        XCTAssertEqual(
+            entries,
+            [
+                GitRepositoryStatusEntry(
+                    path: "tracked.txt",
+                    stagedStatus: " ",
+                    worktreeStatus: "M"
+                ),
+                GitRepositoryStatusEntry(
+                    path: "untracked.txt",
+                    stagedStatus: "?",
+                    worktreeStatus: "?"
+                ),
+            ]
+        )
+    }
+
     func testHasUncommittedChangesEmptyRepository() throws {
         // 空仓库应该没有未提交的更改
         let hasChanges = try LibGit2.hasUncommittedChanges(at: testRepo.repositoryPath)

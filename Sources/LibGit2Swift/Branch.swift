@@ -399,7 +399,16 @@ extension LibGit2 {
 
     /// 比较 HEAD 与 upstream 的 ahead/behind 状态。
     public static func aheadBehind(at path: String) throws -> GitAheadBehind {
+        try aheadBehind(at: path, cancellation: nil)
+    }
+
+    /// 可取消地比较 HEAD 与 upstream 的 ahead/behind 状态。
+    public static func aheadBehind(
+        at path: String,
+        cancellation: GitCancellationToken?
+    ) throws -> GitAheadBehind {
         return try LibGit2.serialized(at: path) {
+            try checkCancellation(cancellation)
             let repo = try openRepository(at: path)
             defer { git_repository_free(repo) }
 
@@ -427,9 +436,11 @@ extension LibGit2 {
             var ahead = 0
             var behind = 0
 
+            try checkCancellation(cancellation)
             guard git_graph_ahead_behind(&ahead, &behind, repo, &headOID, &upstreamOID) == 0 else {
                 throw LibGit2Error.invalidReference
             }
+            try checkCancellation(cancellation)
 
             return GitAheadBehind(ahead: ahead, behind: behind, hasUpstream: true)
         }

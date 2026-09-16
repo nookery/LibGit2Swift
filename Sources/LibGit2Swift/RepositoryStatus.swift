@@ -57,6 +57,25 @@ extension LibGit2 {
                 | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
                 | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
 
+            // `git_status_list_new` has no callback and therefore cannot observe
+            // cancellation while recursively scanning untracked directories.
+            // Use the callback API for cancellable reads so a project switch can
+            // stop at the next status entry instead of waiting for the complete
+            // list to be materialized.
+            if let cancellation {
+                let accumulator = StatusEntriesAccumulator(cancellation: cancellation)
+                let payload = Unmanaged.passUnretained(accumulator).toOpaque()
+                let result = git_status_foreach_ext(
+                    repo,
+                    &options,
+                    statusEntryCallback,
+                    payload
+                )
+                try checkCancellation(cancellation)
+                guard result == 0 else { throw LibGit2Error.cannotGetStatus }
+                return accumulator.entries
+            }
+
             var list: OpaquePointer?
             guard git_status_list_new(&list, repo, &options) == 0, let list else {
                 throw LibGit2Error.cannotGetStatus
@@ -68,7 +87,6 @@ extension LibGit2 {
             entries.reserveCapacity(count)
 
             for index in 0..<count {
-                try checkCancellation(cancellation)
                 guard let entry = git_status_byindex(list, index) else { continue }
 
                 let rawStatus = entry.pointee.status.rawValue
@@ -87,7 +105,6 @@ extension LibGit2 {
                 )
             }
 
-            try checkCancellation(cancellation)
             return entries
         }
     }
@@ -99,6 +116,7 @@ extension LibGit2 {
     ) throws -> GitRepositoryStatus {
         let entries = try getStatusEntries(at: path, cancellation: cancellation)
         let branch: String?
+        try checkCancellation(cancellation)
         if let current = try currentBranchName(at: path) {
             branch = current
         } else if try isHeadDetached(at: path) {
@@ -106,6 +124,7 @@ extension LibGit2 {
         } else {
             branch = nil
         }
+        try checkCancellation(cancellation)
         return GitRepositoryStatus(
             isClean: entries.isEmpty,
             changeCount: entries.count,
@@ -229,5 +248,36 @@ extension LibGit2 {
         if rawStatus & GIT_STATUS_WT_RENAMED.rawValue != 0 { return "R" }
         if rawStatus & GIT_STATUS_WT_TYPECHANGE.rawValue != 0 { return "T" }
         return " "
+    }
+
+    private final class StatusEntriesAccumulator: @unchecked Sendable {
+        let cancellation: GitCancellationToken
+        var entries: [GitRepositoryStatusEntry] = []
+
+        init(cancellation: GitCancellationToken) {
+            self.cancellation = cancellation
+        }
+    }
+
+    private static let statusEntryCallback: @convention(c) (
+        UnsafePointer<CChar>?,
+        UInt32,
+        UnsafeMutableRawPointer?
+    ) -> Int32 = { pathPointer, rawStatus, payload in
+        guard let payload,
+              let pathPointer else { return 0 }
+        let accumulator = Unmanaged<StatusEntriesAccumulator>
+            .fromOpaque(payload)
+            .takeUnretainedValue()
+        guard !accumulator.cancellation.isCancelled else { return 1 }
+
+        accumulator.entries.append(
+            GitRepositoryStatusEntry(
+                path: String(cString: pathPointer),
+                stagedStatus: stagedStatus(from: rawStatus),
+                worktreeStatus: worktreeStatus(from: rawStatus)
+            )
+        )
+        return accumulator.cancellation.isCancelled ? 1 : 0
     }
 }
