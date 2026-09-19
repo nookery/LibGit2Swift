@@ -60,6 +60,82 @@ final class StatusTests: LibGit2SwiftTestCase {
         )
     }
 
+    func testCancellableQueueWaitSkipsWorkAfterCancellation() throws {
+        let queue = LibGit2QueuePool.shared
+        let entered = DispatchSemaphore(value: 0)
+        let blockerFinished = DispatchSemaphore(value: 0)
+        let repositoryPath = testRepo.repositoryPath
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            queue.sync(repositoryPath: repositoryPath) {
+                entered.signal()
+                Thread.sleep(forTimeInterval: 0.4)
+            }
+            blockerFinished.signal()
+        }
+
+        XCTAssertEqual(entered.wait(timeout: .now() + 1), .success)
+
+        let cancellation = GitCancellationToken()
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.03) {
+            cancellation.cancel()
+        }
+
+        let start = Date()
+        XCTAssertThrowsError(
+            try queue.sync(repositoryPath: repositoryPath, cancellation: cancellation) {
+                XCTFail("A cancelled queued task must not enter its body")
+            }
+        ) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.2)
+        XCTAssertEqual(blockerFinished.wait(timeout: .now() + 1), .success)
+    }
+
+    func testCancellableStatusStopsDuringLargeUntrackedScan() throws {
+        let fileManager = FileManager.default
+        for directoryIndex in 0..<40 {
+            let directory = testRepo.tempDirectory
+                .appendingPathComponent("untracked-\(directoryIndex)", isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            for fileIndex in 0..<100 {
+                let file = directory.appendingPathComponent("file-\(fileIndex).txt")
+                XCTAssertTrue(fileManager.createFile(atPath: file.path, contents: Data()))
+            }
+        }
+
+        let cancellation = GitCancellationToken()
+        let finished = expectation(description: "status scan finishes")
+        var result: Result<[GitRepositoryStatusEntry], Error>?
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                result = .success(try LibGit2.getStatusEntries(
+                    at: self.testRepo.repositoryPath,
+                    cancellation: cancellation
+                ))
+            } catch {
+                result = .failure(error)
+            }
+            finished.fulfill()
+        }
+
+        // 4,000 files make it very unlikely that the native scan has completed
+        // before this cancellation reaches the progress callback.
+        Thread.sleep(forTimeInterval: 0.01)
+        cancellation.cancel()
+        wait(for: [finished], timeout: 5)
+
+        guard let result else {
+            return XCTFail("status scan did not produce a result")
+        }
+        guard case let .failure(error) = result else {
+            return XCTFail("large untracked scan completed before cancellation")
+        }
+        XCTAssertTrue(error is CancellationError)
+    }
+
     func testHasUncommittedChangesEmptyRepository() throws {
         // 空仓库应该没有未提交的更改
         let hasChanges = try LibGit2.hasUncommittedChanges(at: testRepo.repositoryPath)
@@ -315,13 +391,20 @@ final class StatusTests: LibGit2SwiftTestCase {
             encoding: .utf8
         )
 
-        let entries = try LibGit2.getStatusEntries(at: testRepo.repositoryPath)
+        let cancellation = GitCancellationToken()
+        let entries = try LibGit2.getStatusEntries(
+            at: testRepo.repositoryPath,
+            cancellation: cancellation
+        )
         XCTAssertEqual(Set(entries.map(\.path)), ["tracked.txt", "staged.txt", "untracked.txt"])
         XCTAssertEqual(entries.first(where: { $0.path == "tracked.txt" })?.worktreeStatus, "M")
         XCTAssertEqual(entries.first(where: { $0.path == "staged.txt" })?.stagedStatus, "A")
         XCTAssertTrue(entries.first(where: { $0.path == "untracked.txt" })?.isUntracked == true)
 
-        let summary = try LibGit2.getRepositoryStatus(at: testRepo.repositoryPath)
+        let summary = try LibGit2.getRepositoryStatus(
+            at: testRepo.repositoryPath,
+            cancellation: cancellation
+        )
         XCTAssertFalse(summary.isClean)
         XCTAssertEqual(summary.changeCount, 3)
         XCTAssertNotNil(summary.branch)
@@ -339,7 +422,10 @@ final class StatusTests: LibGit2SwiftTestCase {
         try FileManager.default.moveItem(at: oldURL, to: newURL)
         try LibGit2.addFiles([], at: testRepo.repositoryPath)
 
-        let entries = try LibGit2.getStatusEntries(at: testRepo.repositoryPath)
+        let entries = try LibGit2.getStatusEntries(
+            at: testRepo.repositoryPath,
+            cancellation: GitCancellationToken()
+        )
         let entry = try XCTUnwrap(entries.first)
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entry.path, "new.txt")

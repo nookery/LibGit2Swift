@@ -88,6 +88,58 @@ public final class LibGit2QueuePool: @unchecked Sendable {
         return try queue.sync(execute: body)
     }
 
+    /// 在指定仓库的执行队列上运行可取消的任务。
+    ///
+    /// `DispatchQueue.sync` 在等待同仓库的前一个任务时无法响应取消，
+    /// 这会让已经失效的 UI 刷新请求继续占住调用线程。这里把任务改为
+    /// 异步投递，并由调用方等待结果；取消后调用方可以立即返回，而队列中
+    /// 的任务会在真正开始前跳过，已经开始的任务则继续通过 token 自身收敛。
+    /// 队列占用计数由异步任务自己释放，避免调用方提前返回后破坏队列池的
+    /// 生命周期和同仓库串行保证。
+    func sync<T>(
+        repositoryPath: String,
+        cancellation: GitCancellationToken,
+        _ body: @escaping () throws -> T
+    ) throws -> T {
+        try cancellation.checkCancellation()
+
+        let key = Self.normalize(repositoryPath)
+        let queue = acquireQueue(for: key)
+
+        // 同一仓库队列上的重入仍然必须同步执行，否则会把内部 API 调用
+        // 重新排到自己后面形成死锁。
+        if DispatchQueue.getSpecific(key: repositorySpecificKey) == key {
+            defer { releaseQueue(for: key) }
+            return try body()
+        }
+
+        let execution = CancellableExecution(cancellation: cancellation, body: body)
+        queue.async { [weak self, execution] in
+            defer { self?.releaseQueue(for: key) }
+
+            if execution.cancellation.isCancelled {
+                execution.finish(.failure(CancellationError()))
+                return
+            }
+
+            do {
+                execution.finish(.success(try execution.body()))
+            } catch {
+                execution.finish(.failure(error))
+            }
+        }
+
+        while true {
+            if execution.semaphore.wait(timeout: .now() + 0.01) == .success {
+                return try execution.value()
+            }
+            if cancellation.isCancelled {
+                // 异步任务仍然持有 queue lease，并会在完成或跳过时释放。
+                throw CancellationError()
+            }
+        }
+    }
+
     /// 重置队列池（仅供测试使用）。
     func reset() {
         lock.withLock { $0.removeAll() }
@@ -159,5 +211,38 @@ public final class LibGit2QueuePool: @unchecked Sendable {
             .resolvingSymlinksInPath()
             .standardizedFileURL
             .path
+    }
+
+    private final class CancellableExecution<T>: @unchecked Sendable {
+        let cancellation: GitCancellationToken
+        let body: () throws -> T
+        let semaphore = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var result: Result<T, Error>?
+
+        init(cancellation: GitCancellationToken, body: @escaping () throws -> T) {
+            self.cancellation = cancellation
+            self.body = body
+        }
+
+        func finish(_ result: Result<T, Error>) {
+            lock.lock()
+            guard self.result == nil else {
+                lock.unlock()
+                return
+            }
+            self.result = result
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        func value() throws -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let result else {
+                throw LibGit2Error.invalidRepositoryState("Cancellable execution completed without a result.")
+            }
+            return try result.get()
+        }
     }
 }

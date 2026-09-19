@@ -52,6 +52,20 @@ public class LibGit2: SuperLog {
         return try queuePool.sync(repositoryPath: repositoryPath, body)
     }
 
+    /// 在指定仓库的执行队列上运行可取消的操作。
+    static func serialized<T>(
+        at repositoryPath: String,
+        cancellation: GitCancellationToken,
+        _ body: @escaping () throws -> T
+    ) throws -> T {
+        _ = cLayerInitialized
+        return try queuePool.sync(
+            repositoryPath: repositoryPath,
+            cancellation: cancellation,
+            body
+        )
+    }
+
     /// 在**全局执行队列**上执行 `body`，用于无单一仓库语义的操作。
     ///
     /// 仅限生命周期（`initialize` / `shutdown`）、版本查询、全局配置与纯工具

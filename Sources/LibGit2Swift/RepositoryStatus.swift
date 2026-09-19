@@ -43,70 +43,72 @@ extension LibGit2 {
         at path: String,
         cancellation: GitCancellationToken? = nil
     ) throws -> [GitRepositoryStatusEntry] {
-        try LibGit2.serialized(at: path) {
-            try checkCancellation(cancellation)
+        if let cancellation {
+            return try LibGit2.serialized(at: path, cancellation: cancellation) {
+                try getStatusEntriesUnlocked(at: path, cancellation: cancellation)
+            }
+        }
+
+        return try LibGit2.serialized(at: path) {
+            try getStatusEntriesUnlocked(at: path, cancellation: nil)
+        }
+    }
+
+    private static func getStatusEntriesUnlocked(
+        at path: String,
+        cancellation: GitCancellationToken?
+    ) throws -> [GitRepositoryStatusEntry] {
+        if let cancellation {
             let repo = try openRepositoryUnlocked(at: path)
             defer { git_repository_free(repo) }
-
-            var options = git_status_options()
-            guard git_status_init_options(&options, UInt32(GIT_STATUS_OPTIONS_VERSION)) == 0 else {
-                throw LibGit2Error.cannotGetStatus
-            }
-            options.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue
-                | GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
-                | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
-                | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
-
-            // `git_status_list_new` has no callback and therefore cannot observe
-            // cancellation while recursively scanning untracked directories.
-            // Use the callback API for cancellable reads so a project switch can
-            // stop at the next status entry instead of waiting for the complete
-            // list to be materialized.
-            if let cancellation {
-                let accumulator = StatusEntriesAccumulator(cancellation: cancellation)
-                let payload = Unmanaged.passUnretained(accumulator).toOpaque()
-                let result = git_status_foreach_ext(
-                    repo,
-                    &options,
-                    statusEntryCallback,
-                    payload
-                )
-                try checkCancellation(cancellation)
-                guard result == 0 else { throw LibGit2Error.cannotGetStatus }
-                return accumulator.entries
-            }
-
-            var list: OpaquePointer?
-            guard git_status_list_new(&list, repo, &options) == 0, let list else {
-                throw LibGit2Error.cannotGetStatus
-            }
-            defer { git_status_list_free(list) }
-
-            var entries: [GitRepositoryStatusEntry] = []
-            let count = git_status_list_entrycount(list)
-            entries.reserveCapacity(count)
-
-            for index in 0..<count {
-                guard let entry = git_status_byindex(list, index) else { continue }
-
-                let rawStatus = entry.pointee.status.rawValue
-                let staged = stagedStatus(from: rawStatus)
-                let worktree = worktreeStatus(from: rawStatus)
-                let delta = entry.pointee.index_to_workdir ?? entry.pointee.head_to_index
-                let pathPointer = delta?.pointee.new_file.path ?? delta?.pointee.old_file.path
-                guard let pathPointer else { continue }
-
-                entries.append(
-                    GitRepositoryStatusEntry(
-                        path: String(cString: pathPointer),
-                        stagedStatus: staged,
-                        worktreeStatus: worktree
-                    )
-                )
-            }
-
-            return entries
+            return try getCancellableStatusEntriesUnlocked(
+                repo: repo,
+                cancellation: cancellation
+            )
         }
+
+        let repo = try openRepositoryUnlocked(at: path)
+        defer { git_repository_free(repo) }
+
+        var options = git_status_options()
+        guard git_status_init_options(&options, UInt32(GIT_STATUS_OPTIONS_VERSION)) == 0 else {
+            throw LibGit2Error.cannotGetStatus
+        }
+        options.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue
+            | GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
+            | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
+            | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
+
+        var list: OpaquePointer?
+        guard git_status_list_new(&list, repo, &options) == 0, let list else {
+            throw LibGit2Error.cannotGetStatus
+        }
+        defer { git_status_list_free(list) }
+
+        var entries: [GitRepositoryStatusEntry] = []
+        let count = git_status_list_entrycount(list)
+        entries.reserveCapacity(count)
+
+        for index in 0..<count {
+            guard let entry = git_status_byindex(list, index) else { continue }
+
+            let rawStatus = entry.pointee.status.rawValue
+            let staged = stagedStatus(from: rawStatus)
+            let worktree = worktreeStatus(from: rawStatus)
+            let delta = entry.pointee.index_to_workdir ?? entry.pointee.head_to_index
+            let pathPointer = delta?.pointee.new_file.path ?? delta?.pointee.old_file.path
+            guard let pathPointer else { continue }
+
+            entries.append(
+                GitRepositoryStatusEntry(
+                    path: String(cString: pathPointer),
+                    stagedStatus: staged,
+                    worktreeStatus: worktree
+                )
+            )
+        }
+
+        return entries
     }
 
     /// 读取工作区摘要，不依赖系统 `git` 命令。
@@ -225,6 +227,233 @@ extension LibGit2 {
         return entries
     }
 
+    /// 用 diff 的 progress callback 构建可取消的状态快照。
+    ///
+    /// `git_status_foreach_ext` 只能在已经发现一个状态条目后回调；当 libgit2
+    /// 正在递归枚举一个很大的未跟踪目录时，目录为空或尚未发现条目的阶段仍然
+    /// 无法响应取消。`git_diff_*` 在每个文件比较前都会调用 progress callback，
+    /// 因而可以在扫描过程中及时终止。
+    private static func getCancellableStatusEntriesUnlocked(
+        repo: OpaquePointer,
+        cancellation: GitCancellationToken
+    ) throws -> [GitRepositoryStatusEntry] {
+        try checkCancellation(cancellation)
+
+        var index: OpaquePointer?
+        guard git_repository_index(&index, repo) == 0, let index else {
+            throw LibGit2Error.cannotGetIndex
+        }
+        defer { git_index_free(index) }
+
+        var headTree: OpaquePointer?
+        var headCommit: OpaquePointer?
+        defer {
+            if let headTree { git_tree_free(headTree) }
+            if let headCommit { git_commit_free(headCommit) }
+        }
+
+        var headOID = git_oid()
+        if git_reference_name_to_id(&headOID, repo, "HEAD") == 0,
+           git_commit_lookup(&headCommit, repo, &headOID) == 0,
+           let headCommit {
+            _ = git_commit_tree(&headTree, headCommit)
+        }
+
+        var stagedDiff: OpaquePointer?
+        defer { if let stagedDiff { git_diff_free(stagedDiff) } }
+        var stagedOptions = makeCancellableDiffOptions(cancellation: cancellation)
+        let stagedResult = git_diff_tree_to_index(
+            &stagedDiff,
+            repo,
+            headTree,
+            index,
+            &stagedOptions
+        )
+        try checkDiffResult(stagedResult, cancellation: cancellation)
+        if let stagedDiff {
+            try findSimilarChanges(in: stagedDiff, cancellation: cancellation)
+        }
+
+        var worktreeDiff: OpaquePointer?
+        defer { if let worktreeDiff { git_diff_free(worktreeDiff) } }
+        var worktreeOptions = makeCancellableDiffOptions(cancellation: cancellation)
+        worktreeOptions.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue
+            | GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue
+        let worktreeResult = git_diff_index_to_workdir(
+            &worktreeDiff,
+            repo,
+            index,
+            &worktreeOptions
+        )
+        try checkDiffResult(worktreeResult, cancellation: cancellation)
+        if let worktreeDiff {
+            try findSimilarChanges(in: worktreeDiff, cancellation: cancellation)
+        }
+
+        var statuses: [String: (staged: Character, worktree: Character)] = [:]
+        var order: [String] = []
+
+        if let stagedDiff {
+            try appendDiffStatuses(
+                from: stagedDiff,
+                staged: true,
+                statuses: &statuses,
+                order: &order,
+                cancellation: cancellation
+            )
+        }
+        if let worktreeDiff {
+            try appendDiffStatuses(
+                from: worktreeDiff,
+                staged: false,
+                statuses: &statuses,
+                order: &order,
+                cancellation: cancellation
+            )
+        }
+
+        return order.compactMap { path in
+            guard let status = statuses[path] else { return nil }
+            return GitRepositoryStatusEntry(
+                path: path,
+                stagedStatus: status.staged,
+                worktreeStatus: status.worktree
+            )
+        }
+    }
+
+    private static func makeCancellableDiffOptions(
+        cancellation: GitCancellationToken
+    ) -> git_diff_options {
+        var options = git_diff_options()
+        git_diff_init_options(&options, UInt32(GIT_DIFF_OPTIONS_VERSION))
+        let payload = Unmanaged.passUnretained(cancellation).toOpaque()
+        options.progress_cb = statusDiffProgressCallback
+        options.payload = payload
+        return options
+    }
+
+    private static func checkDiffResult(
+        _ result: Int32,
+        cancellation: GitCancellationToken
+    ) throws {
+        try checkCancellation(cancellation)
+        guard result == 0 else { throw LibGit2Error.cannotGetStatus }
+    }
+
+    private static func findSimilarChanges(
+        in diff: OpaquePointer,
+        cancellation: GitCancellationToken
+    ) throws {
+        try checkCancellation(cancellation)
+        var options = git_diff_find_options()
+        guard git_diff_find_options_init(&options, UInt32(GIT_DIFF_FIND_OPTIONS_VERSION)) == 0 else {
+            throw LibGit2Error.cannotGetStatus
+        }
+        options.flags = GIT_DIFF_FIND_RENAMES.rawValue
+        let result = git_diff_find_similar(diff, &options)
+        try checkDiffResult(result, cancellation: cancellation)
+    }
+
+    private static func appendDiffStatuses(
+        from diff: OpaquePointer,
+        staged: Bool,
+        statuses: inout [String: (staged: Character, worktree: Character)],
+        order: inout [String],
+        cancellation: GitCancellationToken
+    ) throws {
+        let count = git_diff_num_deltas(diff)
+        for index in 0..<count {
+            try checkCancellation(cancellation)
+            guard let delta = git_diff_get_delta(diff, index) else { continue }
+            guard let path = statusPath(for: delta.pointee) else { continue }
+
+            if statuses[path] == nil {
+                statuses[path] = (" ", " ")
+                order.append(path)
+            }
+
+            if staged {
+                var status = statuses[path] ?? (" ", " ")
+                status.staged = stagedStatus(from: delta.pointee.status)
+                statuses[path] = status
+            } else {
+                var status = statuses[path] ?? (" ", " ")
+                if delta.pointee.status == GIT_DELTA_UNTRACKED, status.staged == " " {
+                    status.staged = "?"
+                }
+                status.worktree = worktreeStatus(
+                    from: delta.pointee.status,
+                    stagedStatus: status.staged
+                )
+                statuses[path] = status
+            }
+        }
+    }
+
+    private static func statusPath(for delta: git_diff_delta) -> String? {
+        switch delta.status {
+        case GIT_DELTA_DELETED:
+            guard let path = delta.old_file.path else { return nil }
+            return String(cString: path)
+        default:
+            guard let path = delta.new_file.path ?? delta.old_file.path else { return nil }
+            return String(cString: path)
+        }
+    }
+
+    private static func stagedStatus(from delta: git_delta_t) -> Character {
+        switch delta {
+        case GIT_DELTA_ADDED, GIT_DELTA_UNTRACKED:
+            return "A"
+        case GIT_DELTA_MODIFIED:
+            return "M"
+        case GIT_DELTA_DELETED:
+            return "D"
+        case GIT_DELTA_RENAMED, GIT_DELTA_COPIED:
+            return "R"
+        case GIT_DELTA_TYPECHANGE:
+            return "T"
+        default:
+            return " "
+        }
+    }
+
+    private static func worktreeStatus(
+        from delta: git_delta_t,
+        stagedStatus: Character
+    ) -> Character {
+        switch delta {
+        case GIT_DELTA_UNTRACKED:
+            return "?"
+        case GIT_DELTA_ADDED:
+            return stagedStatus == "A" ? "M" : "?"
+        case GIT_DELTA_MODIFIED:
+            return "M"
+        case GIT_DELTA_DELETED:
+            return "D"
+        case GIT_DELTA_RENAMED, GIT_DELTA_COPIED:
+            return "R"
+        case GIT_DELTA_TYPECHANGE:
+            return "T"
+        default:
+            return " "
+        }
+    }
+
+    private static let statusDiffProgressCallback: @convention(c) (
+        OpaquePointer?,
+        UnsafePointer<CChar>?,
+        UnsafePointer<CChar>?,
+        UnsafeMutableRawPointer?
+    ) -> Int32 = { _, _, _, payload in
+        guard let payload else { return 0 }
+        let cancellation = Unmanaged<GitCancellationToken>
+            .fromOpaque(payload)
+            .takeUnretainedValue()
+        return cancellation.isCancelled ? GIT_EUSER.rawValue : 0
+    }
+
     private static func git_commitishLookup(repo: OpaquePointer, oid: UnsafeMutablePointer<git_oid>) -> OpaquePointer? {
         var commit: OpaquePointer?
         guard git_commit_lookup(&commit, repo, oid) == 0 else { return nil }
@@ -250,34 +479,4 @@ extension LibGit2 {
         return " "
     }
 
-    private final class StatusEntriesAccumulator: @unchecked Sendable {
-        let cancellation: GitCancellationToken
-        var entries: [GitRepositoryStatusEntry] = []
-
-        init(cancellation: GitCancellationToken) {
-            self.cancellation = cancellation
-        }
-    }
-
-    private static let statusEntryCallback: @convention(c) (
-        UnsafePointer<CChar>?,
-        UInt32,
-        UnsafeMutableRawPointer?
-    ) -> Int32 = { pathPointer, rawStatus, payload in
-        guard let payload,
-              let pathPointer else { return 0 }
-        let accumulator = Unmanaged<StatusEntriesAccumulator>
-            .fromOpaque(payload)
-            .takeUnretainedValue()
-        guard !accumulator.cancellation.isCancelled else { return 1 }
-
-        accumulator.entries.append(
-            GitRepositoryStatusEntry(
-                path: String(cString: pathPointer),
-                stagedStatus: stagedStatus(from: rawStatus),
-                worktreeStatus: worktreeStatus(from: rawStatus)
-            )
-        )
-        return accumulator.cancellation.isCancelled ? 1 : 0
-    }
 }
