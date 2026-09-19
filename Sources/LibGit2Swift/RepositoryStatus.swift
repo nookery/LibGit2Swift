@@ -350,7 +350,12 @@ extension LibGit2 {
         guard git_diff_find_options_init(&options, UInt32(GIT_DIFF_FIND_OPTIONS_VERSION)) == 0 else {
             throw LibGit2Error.cannotGetStatus
         }
+        // Worktree status only needs the path/status tuple. Full similarity
+        // detection can compare many blobs and is disproportionately expensive
+        // for a large repository. Keep exact renames (same blob OID) while
+        // avoiding content similarity scans on the cancellable UI path.
         options.flags = GIT_DIFF_FIND_RENAMES.rawValue
+            | GIT_DIFF_FIND_EXACT_MATCH_ONLY.rawValue
         let result = git_diff_find_similar(diff, &options)
         try checkDiffResult(result, cancellation: cancellation)
     }
