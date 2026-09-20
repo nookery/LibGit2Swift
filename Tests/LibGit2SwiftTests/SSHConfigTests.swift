@@ -402,4 +402,122 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertTrue(content.contains("Host server1"))
         XCTAssertTrue(content.contains("Host server2"))
     }
+
+    // MARK: - URL Normalization Tests
+
+    private func makeConfig(_ host: String, hostName: String? = nil, port: Int? = nil, user: String? = nil) -> [SSHConfig.HostConfig] {
+        [SSHConfig.HostConfig(host: host, hostName: hostName, port: port, user: user)]
+    }
+
+    func testNormalizedURLScpLikeWithCustomPort() {
+        // git@codebowl.juhe.cn:ai/repo.git + Port 2014 -> ssh://git@codebowl.juhe.cn:2014/ai/repo.git
+        let configs = makeConfig("codebowl.juhe.cn", port: 2014)
+        let result = SSHConfig.normalizedURL(for: "git@codebowl.juhe.cn:ai/jenius_pulse.git", configs: configs)
+        XCTAssertEqual(result, "ssh://git@codebowl.juhe.cn:2014/ai/jenius_pulse.git")
+    }
+
+    func testNormalizedURLSSHFormatWithoutPort() {
+        // ssh:// 格式但没写端口，配置里有端口 -> 补上端口
+        let configs = makeConfig("codebowl.juhe.cn", port: 2014)
+        let result = SSHConfig.normalizedURL(for: "ssh://git@codebowl.juhe.cn/ai/jenius_pulse.git", configs: configs)
+        XCTAssertEqual(result, "ssh://git@codebowl.juhe.cn:2014/ai/jenius_pulse.git")
+    }
+
+    func testNormalizedURLAlreadyHasCorrectPort() {
+        // URL 已带正确端口 -> 不需要改写
+        let configs = makeConfig("codebowl.juhe.cn", port: 2014)
+        let result = SSHConfig.normalizedURL(for: "ssh://git@codebowl.juhe.cn:2014/ai/jenius_pulse.git", configs: configs)
+        XCTAssertNil(result)
+    }
+
+    func testNormalizedURLStandardPortUnchanged() {
+        // 配置端口 22，scp 风格 URL -> 保持原样
+        let configs = makeConfig("codebowl.juhe.cn", port: 22)
+        let result = SSHConfig.normalizedURL(for: "git@codebowl.juhe.cn:ai/jenius_pulse.git", configs: configs)
+        XCTAssertNil(result)
+    }
+
+    func testNormalizedURLHostNameAlias() {
+        // 类似 ~/.ssh/config 中 github.com -> ssh.github.com:443 的别名配置
+        let configs = makeConfig("github.com", hostName: "ssh.github.com", port: 443, user: "git")
+        let result = SSHConfig.normalizedURL(for: "git@github.com:org/repo.git", configs: configs)
+        XCTAssertEqual(result, "ssh://git@ssh.github.com:443/org/repo.git")
+    }
+
+    func testNormalizedURLNoMatchingConfig() {
+        let configs = makeConfig("other.example.com", port: 2222)
+        let result = SSHConfig.normalizedURL(for: "git@codebowl.juhe.cn:ai/repo.git", configs: configs)
+        XCTAssertNil(result)
+    }
+
+    func testNormalizedURLHTTPSUnchanged() {
+        let configs = makeConfig("codebowl.juhe.cn", port: 2014)
+        let result = SSHConfig.normalizedURL(for: "https://git@codebowl.juhe.cn/ai/repo.git", configs: configs)
+        XCTAssertNil(result)
+    }
+
+    func testNormalizedURLWildcardConfig() {
+        // Host *.juhe.cn 匹配 codebowl.juhe.cn
+        let configs = makeConfig("*.juhe.cn", port: 2014)
+        let result = SSHConfig.normalizedURL(for: "git@codebowl.juhe.cn:ai/repo.git", configs: configs)
+        XCTAssertEqual(result, "ssh://git@codebowl.juhe.cn:2014/ai/repo.git")
+    }
+
+    func testNormalizedURLUserFromConfig() {
+        // URL 无用户、配置指定 User -> 使用配置用户
+        let configs = makeConfig("10.0.30.1", port: 2222, user: "luwei")
+        let result = SSHConfig.normalizedURL(for: "10.0.30.1:repo.git", configs: configs)
+        XCTAssertEqual(result, "ssh://luwei@10.0.30.1:2222/repo.git")
+    }
+
+    func testNormalizedURLURLUserWinsOverConfig() {
+        // URL 自带用户时，配置中的 User 不覆盖
+        let configs = makeConfig("codebowl.juhe.cn", port: 2014, user: "root")
+        let result = SSHConfig.normalizedURL(for: "git@codebowl.juhe.cn:ai/repo.git", configs: configs)
+        XCTAssertEqual(result, "ssh://git@codebowl.juhe.cn:2014/ai/repo.git")
+    }
+
+    func testParseConfigMultiHostLine() throws {
+        // Host a b 展开为多个条目
+        let configContent = """
+        Host github.com github-jenius
+            HostName ssh.github.com
+            Port 443
+            User git
+        """
+        try configContent.write(to: tempConfigFile, atomically: true, encoding: .utf8)
+
+        var visited: Set<String> = []
+        let configs = SSHConfig.parseConfig(content: configContent, visited: &visited)
+        XCTAssertEqual(configs.count, 2)
+        XCTAssertEqual(Set(configs.map(\.host)), Set(["github.com", "github-jenius"]))
+        XCTAssertTrue(configs.allSatisfy { $0.hostName == "ssh.github.com" && $0.port == 443 })
+    }
+
+    func testParseConfigInclude() throws {
+        // Include 支持：把被包含文件的 Host 配置并入
+        let includeDir = tempSSHDir.appendingPathComponent("config.d")
+        try FileManager.default.createDirectory(at: includeDir, withIntermediateDirectories: true)
+        try "Host included-host\n    Port 2022\n".write(
+            to: includeDir.appendingPathComponent("10-work.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configContent = """
+        Include config.d/*
+        Host main-host
+            Port 2014
+        """
+        try configContent.write(to: tempConfigFile, atomically: true, encoding: .utf8)
+
+        var visited: Set<String> = []
+        let configs = SSHConfig.parseConfig(
+            content: configContent,
+            baseDirectory: tempSSHDir,
+            visited: &visited
+        )
+        XCTAssertTrue(configs.contains { $0.host == "main-host" && $0.port == 2014 })
+        XCTAssertTrue(configs.contains { $0.host == "included-host" && $0.port == 2022 })
+    }
 }

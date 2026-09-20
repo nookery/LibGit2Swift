@@ -180,6 +180,68 @@ extension LibGit2 {
         return networkKeywords.contains { lowercasedMessage.contains($0) }
     }
 
+    // MARK: - SSH Config URL Normalization
+
+    /// 依据 ~/.ssh/config 重写远程 URL，使 libssh2 使用正确的端口 / 主机 / 用户。
+    ///
+    /// libgit2 的 SSH 传输基于 libssh2，不会读取 ~/.ssh/config。当 SSH 服务
+    /// 位于非 22 端口（例如 `Port 2014`）时，必须把 scp 风格 URL 显式改写为
+    /// `ssh://user@host:port/path`，否则会连接被防火墙静默丢弃的 22 端口，
+    /// 表现为 `failed to start SSH session: Failed getting banner`。
+    ///
+    /// 改写通过临时更新 git config 中的远程 URL 并重新加载远程对象实现；
+    /// 返回的闭包负责把 URL 还原。所有网络操作都在仓库级串行队列内执行，
+    /// 因此不会与其他操作竞争同一份配置。
+    ///
+    /// - Returns: 恢复闭包；无需改写时返回 nil。
+    private static func rewriteRemoteURLForSSHConfig(
+        repo: OpaquePointer,
+        remoteName: String,
+        remote: inout OpaquePointer?
+    ) -> (() -> Void)? {
+        guard let urlPointer = git_remote_url(remote) else { return nil }
+        let originalURL = String(cString: urlPointer)
+        guard let normalizedURL = SSHConfig.normalizedURL(for: originalURL),
+              normalizedURL != originalURL else {
+            return nil
+        }
+
+        let setNameResult = remoteName.withCString { namePointer in
+            normalizedURL.withCString { urlPointer in
+                git_remote_set_url(repo, namePointer, urlPointer)
+            }
+        }
+        guard setNameResult == 0 else { return nil }
+
+        // 释放旧远程对象并按新 URL 重新加载
+        git_remote_free(remote)
+        remote = nil
+        guard git_remote_lookup(&remote, repo, remoteName) == 0, remote != nil else {
+            // 改写失败则回滚配置并恢复原远程对象
+            _ = remoteName.withCString { namePointer in
+                originalURL.withCString { urlPointer in
+                    git_remote_set_url(repo, namePointer, urlPointer)
+                }
+            }
+            git_remote_free(remote)
+            remote = nil
+            _ = git_remote_lookup(&remote, repo, remoteName)
+            return nil
+        }
+
+        if NetworkCallbacks.verbose {
+            os_log("\(t)SSH config: rewrote remote URL \(originalURL, privacy: .public) -> \(normalizedURL, privacy: .public)")
+        }
+
+        return {
+            _ = remoteName.withCString { namePointer in
+                originalURL.withCString { urlPointer in
+                    git_remote_set_url(repo, namePointer, urlPointer)
+                }
+            }
+        }
+    }
+
     // MARK: - Public Methods
 
     /// 推送到远程仓库
@@ -334,6 +396,10 @@ extension LibGit2 {
                 throw LibGit2Error.remoteNotFound(remote)
             }
 
+            // 尊重 ~/.ssh/config 中非 22 端口的 SSH 服务（否则 libssh2 连默认端口报 Failed getting banner）
+            let restoreRemoteURL = rewriteRemoteURLForSSHConfig(repo: repo, remoteName: remote, remote: &remoteObj)
+            defer { restoreRemoteURL?() }
+
             guard let remotePtr = remoteObj else {
                 throw LibGit2Error.remoteNotFound(remote)
             }
@@ -434,7 +500,15 @@ extension LibGit2 {
 
             var remoteObj: OpaquePointer?
             defer { if remoteObj != nil { git_remote_free(remoteObj) } }
-            guard git_remote_lookup(&remoteObj, repo, binding.remote) == 0, let remotePtr = remoteObj else {
+            guard git_remote_lookup(&remoteObj, repo, binding.remote) == 0, remoteObj != nil else {
+                throw LibGit2Error.remoteNotFound(binding.remote)
+            }
+
+            // 尊重 ~/.ssh/config 中非 22 端口的 SSH 服务（否则 libssh2 连默认端口报 Failed getting banner）
+            let restoreRemoteURL = rewriteRemoteURLForSSHConfig(repo: repo, remoteName: binding.remote, remote: &remoteObj)
+            defer { restoreRemoteURL?() }
+
+            guard let remotePtr = remoteObj else {
                 throw LibGit2Error.remoteNotFound(binding.remote)
             }
 
@@ -743,9 +817,13 @@ extension LibGit2 {
             var remoteObj: OpaquePointer?
             defer { if remoteObj != nil { git_remote_free(remoteObj) } }
 
-            guard git_remote_lookup(&remoteObj, repo, remote) == 0, let remoteObj else {
+            guard git_remote_lookup(&remoteObj, repo, remote) == 0, remoteObj != nil else {
                 throw LibGit2Error.remoteNotFound(remote)
             }
+
+            // 尊重 ~/.ssh/config 中非 22 端口的 SSH 服务（否则 libssh2 连默认端口报 Failed getting banner）
+            let restoreRemoteURL = rewriteRemoteURLForSSHConfig(repo: repo, remoteName: remote, remote: &remoteObj)
+            defer { restoreRemoteURL?() }
 
             var fetchOpts = git_fetch_options()
             git_fetch_init_options(&fetchOpts, UInt32(GIT_FETCH_OPTIONS_VERSION))
@@ -794,7 +872,9 @@ extension LibGit2 {
         // clone 是最耗时的操作，必须以目标仓库为队列作用域，避免阻塞全局队列。
         // 目标路径此刻通常尚不存在，队列池只把它当作稳定 key，不要求路径有效。
         try LibGit2.serialized(at: destination) {
-            os_log("\(t)Cloning repository from: \(url)")
+            // 尊重 ~/.ssh/config 中非 22 端口的 SSH 服务（否则 libssh2 连默认端口报 Failed getting banner）
+            let effectiveURL = SSHConfig.normalizedURL(for: url) ?? url
+            os_log("\(t)Cloning repository from: \(effectiveURL)")
 
             var cloneOpts = git_clone_options()
             git_clone_init_options(&cloneOpts, UInt32(GIT_CLONE_OPTIONS_VERSION))
@@ -820,7 +900,7 @@ extension LibGit2 {
 
             var repo: OpaquePointer? = nil
             let result = withExtendedLifetime(progressPayload) {
-                git_clone(&repo, url, destination, &cloneOpts)
+                git_clone(&repo, effectiveURL, destination, &cloneOpts)
             }
 
             if result != 0 || repo == nil {
