@@ -41,29 +41,40 @@ extension LibGit2 {
     /// 读取工作区中的文件级状态，不依赖系统 `git` 命令。
     public static func getStatusEntries(
         at path: String,
-        cancellation: GitCancellationToken? = nil
+        cancellation: GitCancellationToken? = nil,
+        detectRenames: Bool = true
     ) throws -> [GitRepositoryStatusEntry] {
         if let cancellation {
             return try LibGit2.serialized(at: path, cancellation: cancellation) {
-                try getStatusEntriesUnlocked(at: path, cancellation: cancellation)
+                try getStatusEntriesUnlocked(
+                    at: path,
+                    cancellation: cancellation,
+                    detectRenames: detectRenames
+                )
             }
         }
 
         return try LibGit2.serialized(at: path) {
-            try getStatusEntriesUnlocked(at: path, cancellation: nil)
+            try getStatusEntriesUnlocked(
+                at: path,
+                cancellation: nil,
+                detectRenames: detectRenames
+            )
         }
     }
 
     private static func getStatusEntriesUnlocked(
         at path: String,
-        cancellation: GitCancellationToken?
+        cancellation: GitCancellationToken?,
+        detectRenames: Bool
     ) throws -> [GitRepositoryStatusEntry] {
         if let cancellation {
             let repo = try openRepositoryUnlocked(at: path)
             defer { git_repository_free(repo) }
             return try getCancellableStatusEntriesUnlocked(
                 repo: repo,
-                cancellation: cancellation
+                cancellation: cancellation,
+                detectRenames: detectRenames
             )
         }
 
@@ -76,8 +87,10 @@ extension LibGit2 {
         }
         options.flags = GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue
             | GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
-            | GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
-            | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
+        if detectRenames {
+            options.flags |= GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX.rawValue
+                | GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR.rawValue
+        }
 
         var list: OpaquePointer?
         guard git_status_list_new(&list, repo, &options) == 0, let list else {
@@ -114,9 +127,14 @@ extension LibGit2 {
     /// 读取工作区摘要，不依赖系统 `git` 命令。
     public static func getRepositoryStatus(
         at path: String,
-        cancellation: GitCancellationToken? = nil
+        cancellation: GitCancellationToken? = nil,
+        detectRenames: Bool = true
     ) throws -> GitRepositoryStatus {
-        let entries = try getStatusEntries(at: path, cancellation: cancellation)
+        let entries = try getStatusEntries(
+            at: path,
+            cancellation: cancellation,
+            detectRenames: detectRenames
+        )
         let branch: String?
         try checkCancellation(cancellation)
         if let current = try currentBranchName(at: path) {
@@ -235,7 +253,8 @@ extension LibGit2 {
     /// 因而可以在扫描过程中及时终止。
     private static func getCancellableStatusEntriesUnlocked(
         repo: OpaquePointer,
-        cancellation: GitCancellationToken
+        cancellation: GitCancellationToken,
+        detectRenames: Bool
     ) throws -> [GitRepositoryStatusEntry] {
         try checkCancellation(cancellation)
 
@@ -270,7 +289,7 @@ extension LibGit2 {
             &stagedOptions
         )
         try checkDiffResult(stagedResult, cancellation: cancellation)
-        if let stagedDiff {
+        if detectRenames, let stagedDiff {
             try findSimilarChanges(in: stagedDiff, cancellation: cancellation)
         }
 
@@ -286,7 +305,7 @@ extension LibGit2 {
             &worktreeOptions
         )
         try checkDiffResult(worktreeResult, cancellation: cancellation)
-        if let worktreeDiff {
+        if detectRenames, let worktreeDiff {
             try findSimilarChanges(in: worktreeDiff, cancellation: cancellation)
         }
 
@@ -350,12 +369,7 @@ extension LibGit2 {
         guard git_diff_find_options_init(&options, UInt32(GIT_DIFF_FIND_OPTIONS_VERSION)) == 0 else {
             throw LibGit2Error.cannotGetStatus
         }
-        // Worktree status only needs the path/status tuple. Full similarity
-        // detection can compare many blobs and is disproportionately expensive
-        // for a large repository. Keep exact renames (same blob OID) while
-        // avoiding content similarity scans on the cancellable UI path.
         options.flags = GIT_DIFF_FIND_RENAMES.rawValue
-            | GIT_DIFF_FIND_EXACT_MATCH_ONLY.rawValue
         let result = git_diff_find_similar(diff, &options)
         try checkDiffResult(result, cancellation: cancellation)
     }
