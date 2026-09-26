@@ -423,6 +423,8 @@ extension LibGit2 {
 
     private static func stagedStatus(from delta: git_delta_t) -> Character {
         switch delta {
+        case GIT_DELTA_CONFLICTED:
+            return "U"
         case GIT_DELTA_ADDED, GIT_DELTA_UNTRACKED:
             return "A"
         case GIT_DELTA_MODIFIED:
@@ -443,6 +445,8 @@ extension LibGit2 {
         stagedStatus: Character
     ) -> Character {
         switch delta {
+        case GIT_DELTA_CONFLICTED:
+            return "U"
         case GIT_DELTA_UNTRACKED:
             return "?"
         case GIT_DELTA_ADDED:
@@ -480,6 +484,7 @@ extension LibGit2 {
     }
 
     private static func stagedStatus(from rawStatus: UInt32) -> Character {
+        if rawStatus & GIT_STATUS_CONFLICTED.rawValue != 0 { return "U" }
         if rawStatus & GIT_STATUS_INDEX_NEW.rawValue != 0 { return "A" }
         if rawStatus & GIT_STATUS_INDEX_MODIFIED.rawValue != 0 { return "M" }
         if rawStatus & GIT_STATUS_INDEX_DELETED.rawValue != 0 { return "D" }
@@ -490,6 +495,7 @@ extension LibGit2 {
     }
 
     private static func worktreeStatus(from rawStatus: UInt32) -> Character {
+        if rawStatus & GIT_STATUS_CONFLICTED.rawValue != 0 { return "U" }
         if rawStatus & GIT_STATUS_WT_NEW.rawValue != 0 { return "?" }
         if rawStatus & GIT_STATUS_WT_MODIFIED.rawValue != 0 { return "M" }
         if rawStatus & GIT_STATUS_WT_DELETED.rawValue != 0 { return "D" }

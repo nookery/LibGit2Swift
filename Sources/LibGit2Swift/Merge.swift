@@ -173,6 +173,23 @@ extension LibGit2 {
         return !conflicts.isEmpty
     }
 
+    /// 列出索引中存在未合并条目的路径（去重并排序）。
+    ///
+    /// 这是合并冲突的权威来源，覆盖所有冲突类型：内容冲突（UU）、双方
+    /// 新增/删除（AA/DD）、一方新增或删除（AU/UA/DU/UD）等，不依赖
+    /// 工作区状态遍历的 XY 状态码映射。
+    /// - Parameter path: 仓库路径
+    /// - Returns: 冲突文件相对仓库根的路径列表
+    public static func getConflictedPaths(at path: String) throws -> [String] {
+        var seen = Set<String>()
+        var paths: [String] = []
+        // 同一个冲突路径在索引中最多有 stage 1/2/3 三个条目，需要去重。
+        for conflict in try getMergeConflictFiles(at: path) where seen.insert(conflict).inserted {
+            paths.append(conflict)
+        }
+        return paths.sorted()
+    }
+
     /// 检查是否正在合并。
     ///
     /// 使用 `LibGit2.repositoryState(at:)` 判定，而不是探测 `.git/MERGE_HEAD`。

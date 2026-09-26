@@ -98,6 +98,30 @@ final class MergeTests: LibGit2SwiftTestCase {
         // 获取冲突文件列表
         let conflictFiles = try LibGit2.getMergeConflictFiles(at: testRepo.repositoryPath)
         XCTAssertTrue(conflictFiles.contains("conflict.txt"))
+
+        // 公开的冲突路径枚举必须去重（同一路径最多有 stage 1/2/3 三个条目）。
+        let conflictedPaths = try LibGit2.getConflictedPaths(at: testRepo.repositoryPath)
+        XCTAssertEqual(conflictedPaths, ["conflict.txt"])
+
+        // 状态遍历（status list 路径）必须把冲突文件报告为未合并，否则冲突
+        // 处理界面会因为列表为空而错误地显示“合并已准备完成”。
+        let statusEntries = try LibGit2.getStatusEntries(
+            at: testRepo.repositoryPath,
+            detectRenames: false
+        )
+        let statusEntry = try XCTUnwrap(statusEntries.first { $0.path == "conflict.txt" })
+        XCTAssertEqual(statusEntry.stagedStatus, "U")
+        XCTAssertEqual(statusEntry.worktreeStatus, "U")
+
+        // 可取消的 diff 路径必须与 status list 路径保持一致。
+        let cancellableEntries = try LibGit2.getStatusEntries(
+            at: testRepo.repositoryPath,
+            cancellation: GitCancellationToken(),
+            detectRenames: false
+        )
+        let cancellableEntry = try XCTUnwrap(cancellableEntries.first { $0.path == "conflict.txt" })
+        XCTAssertEqual(cancellableEntry.stagedStatus, "U")
+        XCTAssertEqual(cancellableEntry.worktreeStatus, "U")
     }
 
     // MARK: - Fast-Forward Merge Tests
