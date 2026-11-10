@@ -75,7 +75,7 @@ MINOR=${MINOR:-0}
 PATCH=${PATCH:-0}
 
 case "${INC}" in
-  major) NEXT="${MAJOR}.0.0" ;;
+  major) NEXT="$((MAJOR + 1)).0.0" ;;
   minor) NEXT="${MAJOR}.$((MINOR + 1)).0" ;;
   patch) NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
   *) echo "Error: unknown increment type '${INC}'" >&2; exit 1 ;;
