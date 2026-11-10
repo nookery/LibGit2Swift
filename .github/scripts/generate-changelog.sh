@@ -24,10 +24,17 @@ fi
 
 cd "$( git rev-parse --show-toplevel )"
 
+# 区间终点：优先用传入的 tag。若 tag 尚未创建（打 tag 之前生成 changelog 的场景），
+# 回退到 HEAD，避免 ref 解析失败导致产出空 changelog。
+END_REF="${TAG}"
+if ! git rev-parse --verify --quiet "${TAG}^{commit}" >/dev/null 2>&1; then
+  END_REF="HEAD"
+fi
+
 if [ -n "${PREVIOUS_TAG}" ]; then
-  RANGE="${PREVIOUS_TAG}..${TAG}"
+  RANGE="${PREVIOUS_TAG}..${END_REF}"
 else
-  RANGE="${TAG}"
+  RANGE="${END_REF}"
 fi
 
 BREAKING=""
