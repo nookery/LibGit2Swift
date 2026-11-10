@@ -19,7 +19,18 @@ git diff --staged             # 暂存区的完整变更内容
 git diff --staged --stat      # 变更文件概览
 ```
 
-### 3. 拆分变更
+### 3. 构建验证
+
+改动源码后必须确认能编译通过：
+
+```bash
+swift build                    # 改动源码后必跑
+swift test                     # 改动测试或核心逻辑后必跑
+```
+
+> **未通过构建验证的代码不要提交。**
+
+### 4. 拆分变更
 
 **一个提交只做一件事。** 若暂存区包含多类不相关变更，先拆开：
 
@@ -27,7 +38,7 @@ git diff --staged --stat      # 变更文件概览
 - 源码改动与依赖更新分开
 - 重建 `Clibgit2.xcframework` 单独提交
 
-### 4. 分析变更类型
+### 5. 分析变更类型
 
 | type | 用途 |
 |------|------|
@@ -42,7 +53,7 @@ git diff --staged --stat      # 变更文件概览
 
 **破坏性变更**：type 后加 `!`，或在正文写 `BREAKING CHANGE: <说明>`。
 
-### 5. 确定 scope
+### 6. 确定 scope
 
 scope 用**功能域名或类型名**，与代码中的命名保持一致：
 
@@ -52,7 +63,7 @@ feat(git) / fix(ssh) / perf(status) / refactor(repository) / ci(release)
 
 跨多个模块的变更可省略 scope。
 
-### 6. 生成提交信息
+### 7. 生成提交信息
 
 格式：
 
@@ -70,13 +81,13 @@ feat(git) / fix(ssh) / perf(status) / refactor(repository) / ci(release)
 - description **小写开头**、**不加句号**、**祈使语气**（`add ...` 而非 `Added ...`）
 - 标题行不超过 72 字符
 
-### 7. 提交
+### 8. 提交
 
 ```bash
 git commit -m "<生成的提交信息>"
 ```
 
-### 8. 提交后确认
+### 9. 提交后确认
 
 ```bash
 git log --oneline -3
