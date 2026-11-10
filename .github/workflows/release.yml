@@ -1,0 +1,96 @@
+name: Release
+
+# 当有 commit 推到 main 时：
+#   1. 依据 Conventional Commits 计算下一个语义化版本号
+#   2. 打 tag 并推送
+#   3. 创建 GitHub Release 页面（附自动生成的 changelog）
+#
+# 与 Lumi 保持一致的体验：push 到 main 即自动发布。
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  # 同一个 main 分支上的多次 push 串行执行，
+  # 避免并发 run 各自算出同一个 tag 互相冲突。
+  group: release-libgit2swift
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # 推 tag + 创建 Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/next-version.sh
+          NEXT="$(.github/scripts/next-version.sh)"
+          echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "## 🚀 LibGit2Swift Release"   >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version**: \`${NEXT}\`"    >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve previous tag
+        id: previous
+        run: |
+          set -euo pipefail
+          PREV="$(git tag -l | grep -E '^[v]?[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          echo "previous_tag=${PREV}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/generate-changelog.sh
+          .github/scripts/generate-changelog.sh \
+            "${{ steps.version.outputs.next_version }}" \
+            "${{ steps.previous.outputs.previous_tag }}" > changelog.md
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+          cat changelog.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.next_version }}"
+          git config user.name  'GitHub Action'
+          git config user.email 'action@github.com'
+          # 远程已存在同名 tag 时让本次 run 失败，避免静默覆盖
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${VERSION} already exists on remote" >&2
+            exit 1
+          fi
+          git tag -a "${VERSION}" -m "Release ${VERSION}"
+          git push origin "${VERSION}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.next_version }}"
+          # 已存在同名 Release 时更新说明，不重复创建
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
+            gh release edit "${VERSION}" --notes-file changelog.md
+          else
+            gh release create "${VERSION}" \
+              --title "LibGit2Swift ${VERSION}" \
+              --notes-file changelog.md
+          fi
+
+      - name: Verify release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.next_version }}"
+          gh release view "${VERSION}" --json tagName,name,isDraft,isPrerelease \
+            --jq '"tag=\(.tagName) name=\(.name) draft=\(.isDraft) prerelease=\(.isPrerelease)"'
+          echo "✅ Published: https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
