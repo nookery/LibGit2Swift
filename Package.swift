@@ -15,7 +15,7 @@ let package = Package(
             targets: ["LibGit2Swift"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/nookery/MagicLog.git", branch: "main"),
+        .package(url: "https://github.com/nookery/MagicLog.git", from: "1.0.0"),
     ],
     targets: [
         // Binary target for libgit2 - built from Scripts/build-libgit2-framework.sh
